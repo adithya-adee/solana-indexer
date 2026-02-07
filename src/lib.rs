@@ -57,6 +57,7 @@ pub use config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
 pub use decoder::{Decoder, DecodedTransaction, EventType, InstructionInfo, ParsedEvent};
 pub use error::{Result, SolanaIndexerError};
 pub use fetcher::Fetcher;
+pub use indexer::SolanaIndexer;
 pub use macros::{
     generate_event_struct, idl_type_to_rust, Idl, IdlAccount, IdlAccountItem, IdlEvent,
     IdlField, IdlInstruction, IdlType, IdlTypeDefinition,
@@ -73,11 +74,9 @@ pub mod config;
 pub mod decoder;
 pub mod error;
 pub mod fetcher;
+pub mod indexer;
 pub mod macros;
 pub mod sources;
 pub mod storage;
 pub mod traits;
 pub mod types;
-
-// Future modules (placeholders for architecture compliance)
-// pub mod tracker; // Merged into storage module

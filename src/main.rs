@@ -1,47 +1,51 @@
-//! SolStream example application.
+//! Solana Indexer - Example Usage
 //!
-//! This demonstrates how to configure and run SolStream with environment variables.
+//! This example demonstrates how to use the Solana Indexer SDK to index
+//! transactions from a Solana program.
 
-#![warn(clippy::all, clippy::pedantic)]
-
-use solana_indexer::{Poller, SolanaIndexerConfigBuilder};
-use std::env;
+use solana_indexer::{Result, SolanaIndexer, SolanaIndexerConfigBuilder};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load environment variables from .env file
-    dotenvy::dotenv()?;
+async fn main() -> Result<()> {
+    // Load environment variables
+    dotenvy::dotenv().ok();
 
-    // Retrieve configuration from environment variables
-    let rpc_url = env::var("RPC_URL")?;
-    let database_url = env::var("DATABASE_URL")?;
-    let program_id = env::var("PROGRAM_ID")?;
+    println!("=== Solana Indexer Example ===\n");
 
-    println!("Initializing SolStream...");
-    println!("RPC URL: {}", rpc_url);
-    println!("Program ID: {}", program_id);
-
-    // Build configuration using the builder pattern
+    // Build configuration from environment variables
     let config = SolanaIndexerConfigBuilder::new()
-        .with_rpc(rpc_url)
-        .with_database(database_url)
-        .program_id(program_id)
-        .with_poll_interval(5) // Poll every 5 seconds
-        .with_batch_size(100) // Fetch up to 100 signatures per poll
+        .with_rpc(
+            std::env::var("RPC_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:8899".to_string()),
+        )
+        .with_database(
+            std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgresql://localhost/solana_indexer".to_string()),
+        )
+        .program_id(
+            std::env::var("PROGRAM_ID")
+                .unwrap_or_else(|_| "11111111111111111111111111111111".to_string()),
+        )
+        .with_poll_interval(5)
+        .with_batch_size(10)
         .build()?;
 
-    println!("Configuration validated successfully!");
-    println!("Poll interval: {} seconds", config.poll_interval_secs);
-    println!("Batch size: {}", config.batch_size);
+    println!("Configuration:");
+    println!("  RPC URL: {}", config.rpc_url);
+    println!("  Database: {}", config.database_url);
+    println!("  Program ID: {}", config.program_id);
+    println!("  Poll Interval: {} seconds", config.poll_interval_secs);
+    println!("  Batch Size: {}\n", config.batch_size);
 
-    // Create poller instance
-    let mut poller = Poller::new(config);
+    // Create indexer
+    let indexer = SolanaIndexer::new(config).await?;
 
-    println!("\nStarting poller...");
-    println!("Press Ctrl+C to stop");
+    println!("Indexer initialized successfully!");
+    println!("Database schema created.");
+    println!("\nStarting indexer...\n");
 
-    // Start polling (this runs indefinitely)
-    poller.start().await?;
+    // Start indexing (runs indefinitely)
+    indexer.start().await?;
 
     Ok(())
 }
