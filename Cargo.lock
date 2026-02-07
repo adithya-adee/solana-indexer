@@ -17,7 +17,6 @@ name = "SolStream"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "anyhow",
  "async-trait",
  "borsh 1.6.0",
  "dotenvy",

@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 anchor-lang = "0.30"
-anyhow = "1.0.101"
 async-trait = "0.1.89"
 borsh = "1.0"
 dotenvy = "0.15.7"

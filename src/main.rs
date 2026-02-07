@@ -1,5 +1,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 #[tokio::main]
-async fn main() {
-    println!("Hello, world!");
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenvy::dotenv()?;
+
+    Ok(())
 }
