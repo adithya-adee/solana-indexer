@@ -58,6 +58,10 @@ pub use decoder::{Decoder, DecodedTransaction, EventType, InstructionInfo, Parse
 pub use error::{Result, SolanaIndexerError};
 pub use fetcher::Fetcher;
 pub use sources::poller::Poller;
+pub use traits::{DynamicEventHandler, EventHandler, HandlerRegistry};
+pub use types::{
+    calculate_discriminator, DepositEvent, EventDiscriminator, TransferEvent, WithdrawEvent,
+};
 
 // Module declarations
 pub mod config;
@@ -65,9 +69,10 @@ pub mod decoder;
 pub mod error;
 pub mod fetcher;
 pub mod sources;
+pub mod traits;
+pub mod types;
 
 // Future modules (placeholders for architecture compliance)
 // pub mod tracker;
-// pub mod traits;
 // pub mod storage;
 // pub mod macros;
