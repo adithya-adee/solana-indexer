@@ -17,3 +17,4 @@ solana-transaction-status = "1.18"
 sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio-native-tls", "postgres", "macros"] }
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
+rayon = "1.11.0"

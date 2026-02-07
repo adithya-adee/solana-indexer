@@ -21,6 +21,7 @@ dependencies = [
  "async-trait",
  "borsh 1.6.0",
  "dotenvy",
+ "rayon",
  "serde",
  "serde_json",
  "solana-client",
