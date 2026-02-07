@@ -57,7 +57,12 @@ pub use config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
 pub use decoder::{Decoder, DecodedTransaction, EventType, InstructionInfo, ParsedEvent};
 pub use error::{Result, SolanaIndexerError};
 pub use fetcher::Fetcher;
+pub use macros::{
+    generate_event_struct, idl_type_to_rust, Idl, IdlAccount, IdlAccountItem, IdlEvent,
+    IdlField, IdlInstruction, IdlType, IdlTypeDefinition,
+};
 pub use sources::poller::Poller;
+pub use storage::Storage;
 pub use traits::{DynamicEventHandler, EventHandler, HandlerRegistry};
 pub use types::{
     calculate_discriminator, DepositEvent, EventDiscriminator, TransferEvent, WithdrawEvent,
@@ -68,11 +73,11 @@ pub mod config;
 pub mod decoder;
 pub mod error;
 pub mod fetcher;
+pub mod macros;
 pub mod sources;
+pub mod storage;
 pub mod traits;
 pub mod types;
 
 // Future modules (placeholders for architecture compliance)
-// pub mod tracker;
-// pub mod storage;
-// pub mod macros;
+// pub mod tracker; // Merged into storage module

@@ -3,7 +3,7 @@
 //! This module provides database interaction utilities, connection pool management,
 //! and idempotency tracking to ensure reliable transaction processing.
 
-use crate::error::{Result, SolanaIndexerError};
+use crate::error::Result;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
 
