@@ -7,6 +7,18 @@ use crate::utils::error::Result;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
 
+use async_trait::async_trait;
+
+/// Abstract interface for storage operations.
+#[async_trait]
+pub trait StorageBackend: Send + Sync {
+    async fn initialize(&self) -> Result<()>;
+    async fn is_processed(&self, signature: &str) -> Result<bool>;
+    async fn mark_processed(&self, signature: &str, slot: u64) -> Result<()>;
+    async fn get_last_processed_slot(&self) -> Result<Option<u64>>;
+    fn pool(&self) -> &PgPool;
+}
+
 /// Database storage manager for the indexer.
 ///
 /// The `Storage` struct manages database connections and provides utilities
@@ -242,6 +254,29 @@ impl Storage {
     }
 }
 
+#[async_trait]
+impl StorageBackend for Storage {
+    async fn initialize(&self) -> Result<()> {
+        self.initialize().await
+    }
+
+    async fn is_processed(&self, signature: &str) -> Result<bool> {
+        self.is_processed(signature).await
+    }
+
+    async fn mark_processed(&self, signature: &str, slot: u64) -> Result<()> {
+        self.mark_processed(signature, slot).await
+    }
+
+    async fn get_last_processed_slot(&self) -> Result<Option<u64>> {
+        self.get_last_processed_slot().await
+    }
+
+    fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,11 +285,11 @@ mod tests {
     fn test_storage_creation() {
         // This test just verifies the struct can be instantiated
         // Actual database tests require a running PostgreSQL instance
-        assert!(true);
+        // Success if we get here
     }
 
     #[tokio::test]
-    #[ignore] // Requires database connection
+    #[ignore = "Requires database connection"] // Requires database connection
     async fn test_storage_initialize() {
         let db_url = std::env::var("TEST_DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://localhost/test".to_string());
@@ -266,7 +301,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires database connection
+    #[ignore = "Requires database connection"] // Requires database connection
     async fn test_idempotency_tracking() {
         let db_url = std::env::var("TEST_DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://localhost/test".to_string());

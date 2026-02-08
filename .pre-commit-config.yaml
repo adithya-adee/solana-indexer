@@ -10,8 +10,9 @@ repos:
         types: [rust]
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --fix --allow-dirty --
+        entry: cargo clippy
         language: system
+        pass_filenames: false
         types: [rust]
         # Always pass --all-targets to clippy to lint all code, including tests and benches
         args: ["--all-targets", "--", "-D", "warnings"]

@@ -249,12 +249,12 @@ mod tests {
         let event = DepositEvent {
             user: "user123".to_string(),
             amount: 5000,
-            timestamp: 1234567890,
+            timestamp: 1_234_567_890,
         };
 
         assert_eq!(event.user, "user123");
         assert_eq!(event.amount, 5000);
-        assert_eq!(event.timestamp, 1234567890);
+        assert_eq!(event.timestamp, 1_234_567_890);
     }
 
     #[test]
@@ -271,12 +271,12 @@ mod tests {
         let event = WithdrawEvent {
             user: "user456".to_string(),
             amount: 2500,
-            timestamp: 9876543210,
+            timestamp: 9_876_543_210,
         };
 
         assert_eq!(event.user, "user456");
         assert_eq!(event.amount, 2500);
-        assert_eq!(event.timestamp, 9876543210);
+        assert_eq!(event.timestamp, 9_876_543_210);
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
         let event = DepositEvent {
             user: "user123".to_string(),
             amount: 5000,
-            timestamp: 1234567890,
+            timestamp: 1_234_567_890,
         };
 
         // Serialize to JSON

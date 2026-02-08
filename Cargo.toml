@@ -27,3 +27,6 @@ rayon = "1.11.0"
 [[bin]]
 name = "solana-indexer"
 path = "src/main.rs"
+
+[dev-dependencies]
+wiremock = "0.6.5"

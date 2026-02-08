@@ -119,7 +119,7 @@
 //! - **Multi-Program Support**: Index multiple programs simultaneously
 //! - **Idempotency**: Automatic deduplication via transaction signatures
 //! - **Flexible Decoders**: Custom instruction parsing logic
-//! - **Database Integration**: Built-in PostgreSQL support with SQLx
+//! - **Database Integration**: Built-in `PostgreSQL` support with `SQLx`
 //! - **Production Ready**: Colorful logging, error recovery, metrics
 
 #![warn(clippy::all, clippy::pedantic)]
@@ -131,7 +131,7 @@ pub use core::decoder::{DecodedTransaction, Decoder, EventType, InstructionInfo,
 pub use core::fetcher::Fetcher;
 pub use core::indexer::SolanaIndexer;
 pub use core::registry::DecoderRegistry;
-pub use storage::Storage;
+pub use storage::{Storage, StorageBackend};
 pub use streams::poller::Poller;
 pub use types::events::{
     DepositEvent, EventDiscriminator, TransferEvent, WithdrawEvent, calculate_discriminator,

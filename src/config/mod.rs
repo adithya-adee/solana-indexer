@@ -32,11 +32,12 @@ pub struct SolanaIndexerConfig {
 
 impl SolanaIndexerConfig {
     /// Helper to get the RPC URL regardless of the source type
+    #[must_use]
     pub fn rpc_url(&self) -> &str {
         match &self.source {
-            SourceConfig::Rpc { rpc_url, .. } => rpc_url,
-            SourceConfig::WebSocket { rpc_url, .. } => rpc_url,
-            SourceConfig::Helius { rpc_url, .. } => rpc_url,
+            SourceConfig::Rpc { rpc_url, .. }
+            | SourceConfig::WebSocket { rpc_url, .. }
+            | SourceConfig::Helius { rpc_url, .. } => rpc_url,
         }
     }
 }

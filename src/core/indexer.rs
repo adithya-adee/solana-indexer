@@ -7,7 +7,7 @@ use crate::config::SourceConfig;
 use crate::{
     config::SolanaIndexerConfig,
     core::{decoder::Decoder, fetcher::Fetcher, registry::DecoderRegistry},
-    storage::Storage,
+    storage::{Storage, StorageBackend},
     streams::{TransactionSource, websocket::WebSocketSource},
     types::traits::{HandlerRegistry, SchemaInitializer},
     utils::{error::Result, logging},
@@ -42,7 +42,7 @@ use tokio::time::{Duration, interval};
 /// ```
 pub struct SolanaIndexer {
     config: SolanaIndexerConfig,
-    storage: Arc<Storage>,
+    storage: Arc<dyn StorageBackend>,
     fetcher: Arc<Fetcher>,
     decoder: Arc<Decoder>,
     decoder_registry: Arc<DecoderRegistry>,
@@ -96,6 +96,26 @@ impl SolanaIndexer {
         })
     }
 
+    /// Creates a new indexer instance with a custom storage backend.
+    ///
+    /// This is useful for testing with mock storage.
+    pub fn new_with_storage(config: SolanaIndexerConfig, storage: Arc<dyn StorageBackend>) -> Self {
+        let fetcher = Arc::new(Fetcher::new(config.rpc_url()));
+        let decoder = Arc::new(Decoder::new());
+        let decoder_registry = Arc::new(DecoderRegistry::new());
+        let handler_registry = Arc::new(HandlerRegistry::new());
+
+        Self {
+            config,
+            storage,
+            fetcher,
+            decoder,
+            decoder_registry,
+            handler_registry,
+            schema_initializers: Vec::new(),
+        }
+    }
+
     /// Returns a reference to the handler registry for registering handlers.
     #[must_use]
     pub fn handler_registry(&self) -> &HandlerRegistry {
@@ -105,6 +125,9 @@ impl SolanaIndexer {
     /// Returns a mutable reference to the handler registry.
     ///
     /// Panics if there are multiple references to the registry.
+    /// # Panics
+    ///
+    /// Panics if the handler registry has multiple references (i.e., if it's being shared).
     pub fn handler_registry_mut(&mut self) -> &mut HandlerRegistry {
         Arc::get_mut(&mut self.handler_registry).expect("HandlerRegistry has multiple references")
     }
@@ -118,6 +141,9 @@ impl SolanaIndexer {
     /// Returns a mutable reference to the decoder registry.
     ///
     /// Panics if there are multiple references to the registry.
+    /// # Panics
+    ///
+    /// Panics if the decoder registry has multiple references.
     pub fn decoder_registry_mut(&mut self) -> &mut DecoderRegistry {
         Arc::get_mut(&mut self.decoder_registry).expect("DecoderRegistry has multiple references")
     }
@@ -140,6 +166,12 @@ impl SolanaIndexer {
     ///
     /// This method runs indefinitely, fetching and processing transactions
     /// based on the configured source (RPC polling or WebSocket subscription).
+    /// # Errors
+    ///
+    /// Returns `SolanaIndexerError` if:
+    /// - Database operations fail
+    /// - RPC/WebSocket connection fails
+    /// - Decoding errors occur
     pub async fn start(self) -> Result<()> {
         match &self.config.source {
             SourceConfig::Rpc { .. } => self.process_rpc_source().await,
@@ -176,7 +208,8 @@ impl SolanaIndexer {
             match self.poll_and_process(&mut last_signature).await {
                 Ok(processed) => {
                     if processed > 0 {
-                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        let duration_ms =
+                            u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
                         logging::log_batch(processed, processed, duration_ms);
                     }
                 }
@@ -221,7 +254,7 @@ impl SolanaIndexer {
 
         logging::log(
             logging::LogLevel::Info,
-            &format!("Starting indexer loop (WebSocket: {})...\n", ws_url),
+            &format!("Starting indexer loop (WebSocket: {ws_url})...\n"),
         );
 
         let mut source = WebSocketSource::new(ws_url, self.config.program_id, reconnect_delay);
@@ -252,7 +285,8 @@ impl SolanaIndexer {
                     }
 
                     if processed_count > 0 {
-                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        let duration_ms =
+                            u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
                         logging::log_batch(processed_count, processed_count, duration_ms);
                     }
                 }
@@ -359,7 +393,7 @@ impl SolanaIndexer {
             solana_transaction_status::EncodedTransaction::Json(ui_tx) => {
                 match &ui_tx.message {
                     solana_transaction_status::UiMessage::Parsed(msg) => &msg.instructions,
-                    _ => {
+                    solana_transaction_status::UiMessage::Raw(_) => {
                         return Ok(()); // Skip non-parsed transactions
                     }
                 }
@@ -411,7 +445,7 @@ mod tests {
         // We can't fully instantiate SolanaIndexer without a real DB, so we verify config
         assert_eq!(config.rpc_url(), "http://127.0.0.1:8899");
         match config.source {
-            SourceConfig::Rpc { .. } => assert!(true),
+            SourceConfig::Rpc { .. } => {}
             _ => panic!("Expected RPC source"),
         }
     }

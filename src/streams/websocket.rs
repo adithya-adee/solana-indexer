@@ -25,17 +25,19 @@ use crate::utils::error::{Result, SolanaIndexerError};
 ///
 /// ```no_run
 /// use solana_indexer::streams::websocket::WebSocketSource;
+/// use solana_indexer::SolanaIndexerConfigBuilder;
 /// use solana_sdk::pubkey::Pubkey;
 /// use std::str::FromStr;
 ///
-/// # async fn example() {
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = SolanaIndexerConfigBuilder::new()
-///     .with_ws("ws://127.0.0.1:8900")
+///     .with_ws("ws://127.0.0.1:8900", "http://127.0.0.1:8899")
 ///     .with_database("postgresql://localhost/db")
 ///     .program_id("11111111111111111111111111111111")
 ///     .build()?;
 /// let program_id = Pubkey::from_str("11111111111111111111111111111111").unwrap();
 /// let source = WebSocketSource::new("ws://127.0.0.1:8900", program_id, 5);
+/// # Ok(())
 /// # }
 /// ```
 pub struct WebSocketSource {
@@ -62,22 +64,22 @@ enum WebSocketState {
 /// WebSocket notification from Solana (logsSubscribe)
 #[derive(Debug, Deserialize)]
 struct LogsNotification {
-    params: LogsNotificationParams,
+    pub(super) params: LogsNotificationParams,
 }
 
 #[derive(Debug, Deserialize)]
 struct LogsNotificationParams {
-    result: LogsNotificationResult,
+    pub(super) result: LogsNotificationResult,
 }
 
 #[derive(Debug, Deserialize)]
 struct LogsNotificationResult {
-    value: LogsNotificationValue,
+    pub(super) value: LogsNotificationValue,
 }
 
 #[derive(Debug, Deserialize)]
 struct LogsNotificationValue {
-    signature: String,
+    pub(super) signature: String,
 }
 
 /// Subscription response from Solana
@@ -91,7 +93,7 @@ impl WebSocketSource {
     ///
     /// # Arguments
     ///
-    /// * `ws_url` - The WebSocket URL (e.g., "ws://127.0.0.1:8900")
+    /// * `ws_url` - The WebSocket URL (e.g., `<ws://127.0.0.1:8900>`)
     /// * `program_id` - The program ID to monitor for notifications
     /// * `reconnect_delay_secs` - Seconds to wait before reconnecting after a disconnect
     ///
@@ -270,8 +272,38 @@ mod tests {
         assert_eq!(source.reconnect_delay_secs, reconnect_delay);
 
         match source.state {
-            WebSocketState::Disconnected => assert!(true),
-            _ => panic!("Expected initially disconnected state"),
+            WebSocketState::Disconnected => {}
+            WebSocketState::Connected { .. } => panic!("Expected initially disconnected state"),
         }
+    }
+
+    #[test]
+    fn test_logs_notification_deserialization() {
+        let json_data = r#"{
+            "jsonrpc": "2.0",
+            "method": "logsNotification",
+            "params": {
+                "result": {
+                    "context": {
+                        "slot": 5208469
+                    },
+                    "value": {
+                        "signature": "5h6xBEauJ3PK6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc",
+                        "err": null,
+                        "logs": [
+                            "Program 11111111111111111111111111111111 invoke [1]",
+                            "Program 11111111111111111111111111111111 success"
+                        ]
+                    }
+                },
+                "subscription": 12345
+            }
+        }"#;
+
+        let notification: LogsNotification = serde_json::from_str(json_data).unwrap();
+        assert_eq!(
+            notification.params.result.value.signature,
+            "5h6xBEauJ3PK6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc6rJ9pG4Q8Xc"
+        );
     }
 }
