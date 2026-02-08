@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
         .build()?;
 
     println!("Configuration:");
-    println!("  RPC URL: {}", config.rpc_url);
+    println!("  RPC URL: {}", config.rpc_url());
     println!("  Database: {}", config.database_url);
     println!("  Program ID: {}", config.program_id);
     println!("  Poll Interval: {} seconds", config.poll_interval_secs);

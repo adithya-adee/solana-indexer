@@ -14,8 +14,7 @@ use std::str::FromStr;
 /// instances of this struct.
 #[derive(Debug, Clone)]
 pub struct SolanaIndexerConfig {
-    /// Solana RPC endpoint URL (e.g., <http://127.0.0.1:8899>)
-    pub rpc_url: String,
+
 
     /// Database connection URL (e.g., <postgresql://user:pass@localhost:5432/db>)
     pub database_url: String,
@@ -28,6 +27,42 @@ pub struct SolanaIndexerConfig {
 
     /// Batch size for fetching transactions (default: 100)
     pub batch_size: usize,
+
+    /// Source configuration
+    pub source: SourceConfig,
+}
+
+impl SolanaIndexerConfig {
+    /// Helper to get the RPC URL regardless of the source type
+    pub fn rpc_url(&self) -> &str {
+        match &self.source {
+            SourceConfig::Rpc { rpc_url, .. } => rpc_url,
+            SourceConfig::WebSocket { rpc_url, .. } => rpc_url,
+            SourceConfig::Helius { rpc_url, .. } => rpc_url,
+        }
+    }
+}
+
+/// Configuration for the data source
+#[derive(Debug, Clone)]
+pub enum SourceConfig {
+    /// Standard RPC polling source
+    Rpc {
+        rpc_url: String,
+        poll_interval_secs: u64,
+        batch_size: usize,
+    },
+    /// WebSocket source with RPC fallback
+    WebSocket {
+        ws_url: String,
+        rpc_url: String,
+        reconnect_delay_secs: u64,
+    },
+    /// Helius-specific source (future proofing)
+    Helius {
+        api_key: String,
+        rpc_url: String,
+    },
 }
 
 /// Builder for `SolanaIndexerConfig`.
@@ -54,11 +89,11 @@ pub struct SolanaIndexerConfig {
 /// ```
 #[derive(Debug, Default)]
 pub struct SolanaIndexerConfigBuilder {
-    rpc_url: Option<String>,
     database_url: Option<String>,
     program_id: Option<String>,
     poll_interval_secs: Option<u64>,
     batch_size: Option<usize>,
+    source: Option<SourceConfig>,
 }
 
 impl SolanaIndexerConfigBuilder {
@@ -83,7 +118,36 @@ impl SolanaIndexerConfigBuilder {
     /// ```
     #[must_use]
     pub fn with_rpc(mut self, url: impl Into<String>) -> Self {
-        self.rpc_url = Some(url.into());
+        let url = url.into();
+        self.source = Some(SourceConfig::Rpc { 
+            rpc_url: url,
+            poll_interval_secs: self.poll_interval_secs.unwrap_or(5),
+            batch_size: self.batch_size.unwrap_or(100),
+        });
+        self
+    }
+
+    /// Sets the WebSocket source.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ws_url` - The WebSocket URL
+    /// * `rpc_url` - The RPC URL for fetching full transactions
+    /// 
+    /// # Example
+    /// 
+    /// ```no_run
+    /// # use solana_indexer::SolanaIndexerConfigBuilder;
+    /// let builder = SolanaIndexerConfigBuilder::new()
+    ///     .with_ws("ws://127.0.0.1:8900", "http://127.0.0.1:8899");
+    /// ```
+    #[must_use]
+    pub fn with_ws(mut self, ws_url: impl Into<String>, rpc_url: impl Into<String>) -> Self {
+        self.source = Some(SourceConfig::WebSocket { 
+            ws_url: ws_url.into(), 
+            rpc_url: rpc_url.into(),
+            reconnect_delay_secs: 5, // Default
+        });
         self
     }
 
@@ -141,6 +205,14 @@ impl SolanaIndexerConfigBuilder {
     #[must_use]
     pub fn with_poll_interval(mut self, secs: u64) -> Self {
         self.poll_interval_secs = Some(secs);
+        // Update source if it's already set to Rpc
+        if let Some(SourceConfig::Rpc { rpc_url, batch_size, .. }) = &self.source {
+            self.source = Some(SourceConfig::Rpc {
+                rpc_url: rpc_url.clone(),
+                poll_interval_secs: secs,
+                batch_size: *batch_size,
+            });
+        }
         self
     }
 
@@ -160,6 +232,14 @@ impl SolanaIndexerConfigBuilder {
     #[must_use]
     pub fn with_batch_size(mut self, size: usize) -> Self {
         self.batch_size = Some(size);
+        // Update source if it's already set to Rpc
+        if let Some(SourceConfig::Rpc { rpc_url, poll_interval_secs, .. }) = &self.source {
+            self.source = Some(SourceConfig::Rpc {
+                rpc_url: rpc_url.clone(),
+                poll_interval_secs: *poll_interval_secs,
+                batch_size: size,
+            });
+        }
         self
     }
 
@@ -185,10 +265,6 @@ impl SolanaIndexerConfigBuilder {
     /// # }
     /// ```
     pub fn build(self) -> Result<SolanaIndexerConfig> {
-        let rpc_url = self
-            .rpc_url
-            .ok_or_else(|| SolanaIndexerError::ConfigError("RPC URL is required".to_string()))?;
-
         let database_url = self.database_url.ok_or_else(|| {
             SolanaIndexerError::ConfigError("Database URL is required".to_string())
         })?;
@@ -201,12 +277,20 @@ impl SolanaIndexerConfigBuilder {
             SolanaIndexerError::ConfigError(format!("Invalid program ID '{program_id_str}': {e}"))
         })?;
 
+        let poll_interval_secs = self.poll_interval_secs.unwrap_or(5);
+        let batch_size = self.batch_size.unwrap_or(100);
+
+        // If source is not set, error out (or default? user said remove rpc_url, so we force setting it via with_rpc or with_ws)
+        let source = self.source.ok_or_else(|| {
+             SolanaIndexerError::ConfigError("Source configuration (RPC or WebSocket) is required".to_string())
+        })?;
+
         Ok(SolanaIndexerConfig {
-            rpc_url,
             database_url,
             program_id,
-            poll_interval_secs: self.poll_interval_secs.unwrap_or(5),
-            batch_size: self.batch_size.unwrap_or(100),
+            poll_interval_secs,
+            batch_size,
+            source,
         })
     }
 }

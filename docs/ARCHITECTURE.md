@@ -124,13 +124,14 @@ Configuration is managed via a `SolanaIndexerConfig` struct, built using a fluen
 
 **Example:**
 ```rust
-SolanaIndexer::new()
-    .with_rpc("http://127.0.0.1:8899")
+SolanaIndexerConfigBuilder::new()
+    .with_rpc("http://127.0.0.1:8899") // or .with_ws("ws://...", "http://...")
     .with_database(env::var("DATABASE_URL")?)
     .program_id(env::var("PROGRAM_ID")?)
-    .register_handler::<TransferEvent>(TransferHandler)
-    .start() // Or .start_polling(), .start_websocket()
-    .await
+    .build()?;
+
+let indexer = SolanaIndexer::new(config).await?;
+indexer.start().await?;
 ```
 
 ### Environment Variable Integration
@@ -145,15 +146,15 @@ For convenience, especially in local development, SolanaIndexer seamlessly integ
 
 SolanaIndexer supports multiple indexing strategies, allowing developers to select the best fit for their use case and performance requirements.
 
-*   **Program-Specific Polling (Current Default):**
+*   **Program-Specific Polling (Default via `with_rpc`):**
     *   **Mechanism:** Periodically queries an RPC node for transactions related to a specific `PROGRAM_ID`.
     *   **Use Case:** Ideal for local development, testing, and applications with moderate throughput requirements on a single program.
-    *   **Activation:** Configured via `.program_id(...)` and initiated with `.start_polling()`.
+    *   **Activation:** Configured via `.with_rpc(...)`.
 
-*   **Program-Specific WebSocket Subscriptions (Production Roadmap):**
+*   **Program-Specific WebSocket Subscriptions (Real-time via `with_ws`):**
     *   **Mechanism:** Maintains a persistent WebSocket connection to an RPC node, receiving real-time notifications for transactions involving a specific `PROGRAM_ID`.
     *   **Use Case:** Critical for high-throughput, low-latency production applications requiring immediate data processing.
-    *   **Activation:** Initiated with `.start_websocket()`.
+    *   **Activation:** Configured via `.with_ws(...)`.
 
 *   **General/Multi-Program Indexing (Production Roadmap):**
     *   **Mechanism:** Capabilities to index events or instructions from multiple programs, or to process broad categories of on-chain activity (e.g., all SPL token transfers) without being tied to a single `PROGRAM_ID`. This often involves integrating with specialized data providers (e.g., Helius, Blockdaemon).
@@ -372,12 +373,12 @@ Transaction → InstructionDecoder<T> → Option<T> → EventHandler<T> → Data
                parsing logic)          Event)     business logic)
 ```
 
-1. **SDK fetches transaction** from Solana network
-2. **Decoder Registry routes** instructions to appropriate `InstructionDecoder<T>`
-3. **Developer's decoder** parses raw bytes into typed event `T`
-4. **Handler Registry dispatches** event to appropriate `EventHandler<T>`
-5. **Developer's handler** processes event (database writes, API calls, etc.)
-6. **SDK marks transaction** as processed in idempotency tracker
+1.  **SDK fetches transaction** from Solana network
+2.  **Decoder Registry routes** instructions to appropriate `InstructionDecoder<T>`
+3.  **Developer's decoder** parses raw bytes into typed event `T`
+4.  **Handler Registry dispatches** event to appropriate `EventHandler<T>`
+5.  **Developer's handler** processes event (database writes, API calls, etc.)
+6.  **SDK marks transaction** as processed in idempotency tracker
 
 This separation allows developers to:
 - **Reuse decoders** across multiple handlers
@@ -451,7 +452,7 @@ solana-indexer/
 │   ├── sources/                   // Input source implementations
 │   │   ├── mod.rs
 │   │   └── poller.rs              // Poller implementation
-│   │   └── websocket.rs           // (Future)
+│   │   └── websocket.rs           // WebSocket implementation
 │   ├── fetcher.rs                 // Logic for fetching full transaction data
 │   ├── decoder.rs                 // IDL-driven and generic data parsing
 │   ├── indexer.rs                 // Main orchestrator logic
@@ -621,14 +622,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Register both the decoder (for parsing) and handler (for processing).
     // The `SolanaIndexer::new()` builder pattern allows for flexible
     // and type-safe configuration.
-    SolanaIndexer::new()
+    let config = SolanaIndexerConfigBuilder::new()
         .with_rpc(&rpc_url)
         .with_database(&database_url)
-        .register_decoder(&program_id_str, Box::new(MyDecoder))
-        .register_handler::<TransferEvent>(MyTransferHandler)
-        .start_polling() // Initiates the polling-based indexing process.
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?; // Map `SolanaIndexerError` to `Box<dyn Error>`
+        .program_id(&program_id_str)
+        .build()
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
+
+    // Initialize and run the indexer.
+    let mut indexer = SolanaIndexer::new(config).await
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
+
+    indexer.register_decoder(&program_id_str, Box::new(MyDecoder));
+    indexer.register_handler::<TransferEvent>(Box::new(MyTransferHandler));
+
+    indexer.start().await
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
 
     println!("SolanaIndexer indexer started successfully.");
 

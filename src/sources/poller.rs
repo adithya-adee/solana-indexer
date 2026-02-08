@@ -90,7 +90,7 @@ impl Poller {
         let program_id = self.config.program_id;
         let batch_size = self.config.batch_size;
         let last_sig = self.last_signature;
-        let rpc_url = self.config.rpc_url.clone();
+        let rpc_url = self.config.rpc_url().to_string();
 
         let signatures = tokio::task::spawn_blocking(move || {
             use solana_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
@@ -159,10 +159,10 @@ impl Poller {
         let mut interval = time::interval(poll_interval);
 
         // Initialize fetcher and decoder
-        let fetcher = Fetcher::new(self.config.rpc_url.clone());
+        let fetcher = Fetcher::new(self.config.rpc_url());
         let decoder = Decoder::new();
 
-        println!("Starting poller with RPC: {}", self.config.rpc_url);
+        println!("Starting poller with RPC: {}", self.config.rpc_url());
         println!("Monitoring program: {}", self.config.program_id);
 
         loop {
@@ -262,11 +262,15 @@ mod tests {
     #[test]
     fn test_poller_creation() {
         let config = SolanaIndexerConfig {
-            rpc_url: "http://127.0.0.1:8899".to_string(),
             database_url: "postgresql://localhost/db".to_string(),
             program_id: solana_sdk::pubkey::Pubkey::default(),
             poll_interval_secs: 5,
             batch_size: 100,
+            source: crate::common::config::SourceConfig::Rpc {
+                rpc_url: "http://127.0.0.1:8899".to_string(),
+                poll_interval_secs: 5,
+                batch_size: 100,
+            },
         };
 
         let poller = Poller::new(config);

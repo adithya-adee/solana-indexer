@@ -12,8 +12,10 @@ use crate::{
     decoder::Decoder,
     decoder_registry::DecoderRegistry,
     fetcher::Fetcher,
+    sources::{websocket::WebSocketSource, TransactionSource},
     storage::Storage,
 };
+use crate::common::config::SourceConfig;
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -82,7 +84,7 @@ impl SolanaIndexer {
         let storage = Arc::new(Storage::new(&config.database_url).await?);
         storage.initialize().await?;
 
-        let fetcher = Arc::new(Fetcher::new(&config.rpc_url));
+        let fetcher = Arc::new(Fetcher::new(config.rpc_url()));
         let decoder = Arc::new(Decoder::new());
         let decoder_registry = Arc::new(DecoderRegistry::new());
         let handler_registry = Arc::new(HandlerRegistry::new());
@@ -144,12 +146,20 @@ impl SolanaIndexer {
     /// fetching and decoding them, checking for duplicates, and
     /// dispatching events to registered handlers.
     pub async fn start(self) -> Result<()> {
+        match &self.config.source {
+            SourceConfig::Rpc { .. } => self.process_rpc_source().await,
+            SourceConfig::WebSocket { .. } => self.process_websocket_source().await,
+            SourceConfig::Helius { .. } => self.process_helius_source().await,
+        }
+    }
+
+    async fn process_rpc_source(self) -> Result<()> {
         use crate::common::logging;
         
         // Display startup banner
         logging::log_startup(
             &self.config.program_id.to_string(),
-            &self.config.rpc_url,
+            self.config.rpc_url(),
             self.config.poll_interval_secs,
         );
 
@@ -163,7 +173,7 @@ impl SolanaIndexer {
         let mut poll_interval = interval(Duration::from_secs(self.config.poll_interval_secs));
         let mut last_signature: Option<Signature> = None;
 
-        logging::log(logging::LogLevel::Info, "Starting indexer loop...\n");
+        logging::log(logging::LogLevel::Info, "Starting indexer loop (RPC)...\n");
 
         loop {
             poll_interval.tick().await;
@@ -183,6 +193,77 @@ impl SolanaIndexer {
                 }
             }
         }
+    }
+
+    async fn process_websocket_source(self) -> Result<()> {
+        use crate::common::logging;
+
+        // Display startup banner
+        logging::log_startup(
+            &self.config.program_id.to_string(),
+            self.config.rpc_url(),
+            0, // Real-time
+        );
+
+        // Run schema initializers
+        for initializer in &self.schema_initializers {
+            logging::log(logging::LogLevel::Info, "Initializing database schema...");
+            initializer.initialize(self.storage.pool()).await?;
+        }
+        logging::log(logging::LogLevel::Success, "Database schema initialized");
+
+        // Extract WebSocket config
+        let (ws_url, reconnect_delay) = match &self.config.source {
+            SourceConfig::WebSocket { ws_url, reconnect_delay_secs, .. } => (ws_url.clone(), *reconnect_delay_secs),
+            _ => return Err(crate::common::error::SolanaIndexerError::ConfigError("Invalid source config".to_string())),
+        };
+
+        logging::log(logging::LogLevel::Info, &format!("Starting indexer loop (WebSocket: {})...\n", ws_url));
+
+        let mut source = WebSocketSource::new(ws_url, self.config.program_id, reconnect_delay);
+
+        loop {
+            match source.next_batch().await {
+                Ok(signatures) => {
+                     let start_time = std::time::Instant::now();
+                     let mut processed_count = 0;
+
+                     for signature in signatures {
+                         let sig_str = signature.to_string();
+
+                         // Check if already processed (idempotency)
+                         if self.storage.is_processed(&sig_str).await? {
+                             continue;
+                         }
+
+                         // Process transaction
+                         match self.process_transaction(&signature).await {
+                             Ok(()) => {
+                                 processed_count += 1;
+                             }
+                             Err(e) => {
+                                 logging::log_error("Transaction error", &format!("{sig_str}: {e}"));
+                             }
+                         }
+                     }
+
+                     if processed_count > 0 {
+                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        logging::log_batch(processed_count, processed_count, duration_ms);
+                     }
+                }
+                Err(e) => {
+                     logging::log_error("WebSocket error", &e.to_string());
+                     tokio::time::sleep(Duration::from_secs(reconnect_delay)).await;
+                }
+            }
+        }
+    }
+
+    async fn process_helius_source(self) -> Result<()> {
+        use crate::common::logging;
+        logging::log_error("Helius source", "Not implemented yet");
+        Err(crate::common::error::SolanaIndexerError::ConfigError("Helius source not implemented".to_string()))
     }
 
     async fn poll_and_process(&self, last_signature: &mut Option<Signature>) -> Result<usize> {
@@ -227,7 +308,7 @@ impl SolanaIndexer {
         use solana_client::rpc_client::RpcClient;
         use solana_sdk::commitment_config::CommitmentConfig;
 
-        let rpc_url = self.config.rpc_url.clone();
+        let rpc_url = self.config.rpc_url().to_string();
         let program_id = self.config.program_id;
         let batch_size = self.config.batch_size;
         let last_sig = last_signature.copied();
