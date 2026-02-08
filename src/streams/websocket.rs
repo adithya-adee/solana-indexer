@@ -59,24 +59,24 @@ enum WebSocketState {
     },
 }
 
-/// WebSocket notification from Solana
+/// WebSocket notification from Solana (logsSubscribe)
 #[derive(Debug, Deserialize)]
-struct ProgramNotification {
-    params: NotificationParams,
+struct LogsNotification {
+    params: LogsNotificationParams,
 }
 
 #[derive(Debug, Deserialize)]
-struct NotificationParams {
-    result: NotificationResult,
+struct LogsNotificationParams {
+    result: LogsNotificationResult,
 }
 
 #[derive(Debug, Deserialize)]
-struct NotificationResult {
-    value: NotificationValue,
+struct LogsNotificationResult {
+    value: LogsNotificationValue,
 }
 
 #[derive(Debug, Deserialize)]
-struct NotificationValue {
+struct LogsNotificationValue {
     signature: String,
 }
 
@@ -131,15 +131,17 @@ impl WebSocketSource {
 
         let (mut write, mut read) = ws_stream.split();
 
-        // Subscribe to program
+        // Subscribe to transaction logs mentioning this program
+        // This captures all transactions that involve the program
         let subscribe_request = json!({
             "jsonrpc": "2.0",
             "id": 1,
-            "method": "programSubscribe",
+            "method": "logsSubscribe",
             "params": [
-                self.program_id.to_string(),
                 {
-                    "encoding": "jsonParsed",
+                    "mentions": [self.program_id.to_string()]
+                },
+                {
                     "commitment": "confirmed"
                 }
             ]
@@ -174,7 +176,7 @@ impl WebSocketSource {
         tokio::spawn(async move {
             while let Some(Ok(Message::Text(text))) = read.next().await {
                 #[allow(clippy::collapsible_if)]
-                if let Ok(notification) = serde_json::from_str::<ProgramNotification>(&text) {
+                if let Ok(notification) = serde_json::from_str::<LogsNotification>(&text) {
                     if let Ok(sig) =
                         Signature::from_str(&notification.params.result.value.signature)
                     {

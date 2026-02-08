@@ -435,32 +435,38 @@ Security is built into SolanaIndexer's design, protecting both the indexed data 
 
 ## 8. Directory Structure
 
-```
 solana-indexer/
 ├── Cargo.toml
 ├── idl/
 │   └── your_program.json          // Developer drops IDL here (e.g., from Anchor)
 ├── src/
 │   ├── lib.rs                     // Public API and main entry point
-│   ├── common/                    // Shared utilities and core types
-│   │   ├── config.rs              // SolanaIndexerConfig
-│   │   ├── error.rs               // SolanaIndexerError enum
-│   │   ├── macros.rs              // Procedural macro for IDL compilation
-│   │   ├── traits.rs              // EventHandler and SchemaInitializer traits
-│   │   ├── types.rs               // Core event types
-│   │   └── mod.rs                 // Module exports
-│   ├── sources/                   // Input source implementations
+│   ├── config/                    // Configuration management
+│   │   └── mod.rs
+│   ├── core/                      // Core business logic
 │   │   ├── mod.rs
-│   │   └── poller.rs              // Poller implementation
+│   │   ├── indexer.rs             // Main orchestrator logic
+│   │   ├── fetcher.rs             // Transaction fetching logic
+│   │   ├── decoder.rs             // IDL-driven and generic data parsing
+│   │   └── registry.rs            // Decoder registry
+│   ├── streams/                   // Data ingestion streams
+│   │   ├── mod.rs
+│   │   ├── poller.rs              // HTTP Polling implementation
 │   │   └── websocket.rs           // WebSocket implementation
-│   ├── fetcher.rs                 // Logic for fetching full transaction data
-│   ├── decoder.rs                 // IDL-driven and generic data parsing
-│   ├── indexer.rs                 // Main orchestrator logic
-│   ├── storage.rs                 // Database interaction and idempotency
+│   ├── storage/                   // Persistent storage and idempotency
+│   │   └── mod.rs
+│   ├── types/                     // Domain types and traits
+│   │   ├── mod.rs
+│   │   ├── events.rs              // Event structures
+│   │   └── traits.rs              // EventHandler and SchemaInitializer traits
+│   ├── utils/                     // Shared utilities
+│   │   ├── mod.rs
+│   │   ├── error.rs               // SolanaIndexerError enum
+│   │   ├── logging.rs             // Structured logging
+│   │   └── macros.rs              // Procedural macro for IDL compilation
 │   └── generator/                 // Transaction generator for testing
 └── examples/
     └── token_transfer_indexer.rs  // Demo implementation of an EventHandler
-```
 
 ### Build Flow:
 1.  **Define Program:** Developer writes their Solana program (e.g., using Anchor) and generates its `idl.json`.
