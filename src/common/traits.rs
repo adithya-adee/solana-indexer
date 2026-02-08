@@ -7,7 +7,7 @@
 use crate::common::error::{Result, SolanaIndexerError};
 use crate::common::types::EventDiscriminator;
 use async_trait::async_trait;
-use borsh::BorshSerialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use solana_transaction_status::UiInstruction;
 use sqlx::PgPool;
 
@@ -223,6 +223,23 @@ pub trait DynamicEventHandler: Send + Sync {
 
     /// Returns the event discriminator this handler processes.
     fn discriminator(&self) -> [u8; 8];
+}
+
+/// Automatic conversion from typed handler to dynamic handler.
+#[async_trait]
+impl<T> DynamicEventHandler for Box<dyn EventHandler<T>>
+where
+    T: EventDiscriminator + BorshDeserialize + Send + Sync + 'static,
+{
+    async fn handle_dynamic(&self, event_data: &[u8], db: &PgPool, signature: &str) -> Result<()> {
+        let event = T::try_from_slice(event_data)
+            .map_err(|e| SolanaIndexerError::DecodingError(e.to_string()))?;
+        self.handle(event, db, signature).await
+    }
+
+    fn discriminator(&self) -> [u8; 8] {
+        T::discriminator()
+    }
 }
 
 /// Handler registry for managing multiple event handlers.

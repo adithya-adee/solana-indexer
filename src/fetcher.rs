@@ -107,7 +107,7 @@ impl Fetcher {
             let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
             let config = RpcTransactionConfig {
-                encoding: Some(UiTransactionEncoding::Json),
+                encoding: Some(UiTransactionEncoding::JsonParsed),
                 commitment: Some(CommitmentConfig::confirmed()),
                 max_supported_transaction_version: Some(0),
             };
@@ -180,7 +180,7 @@ impl Fetcher {
                 .par_iter()
                 .map(|sig| {
                     let config = RpcTransactionConfig {
-                        encoding: Some(UiTransactionEncoding::Json),
+                        encoding: Some(UiTransactionEncoding::JsonParsed), // Use JsonParsed for human-readable instructions
                         commitment: Some(CommitmentConfig::confirmed()),
                         max_supported_transaction_version: Some(0),
                     };

@@ -10,6 +10,7 @@ use crate::{
         traits::{HandlerRegistry, SchemaInitializer},
     },
     decoder::Decoder,
+    decoder_registry::DecoderRegistry,
     fetcher::Fetcher,
     storage::Storage,
 };
@@ -46,6 +47,7 @@ pub struct SolanaIndexer {
     storage: Arc<Storage>,
     fetcher: Arc<Fetcher>,
     decoder: Arc<Decoder>,
+    decoder_registry: Arc<DecoderRegistry>,
     handler_registry: Arc<HandlerRegistry>,
     schema_initializers: Vec<Box<dyn SchemaInitializer>>,
 }
@@ -82,6 +84,7 @@ impl SolanaIndexer {
 
         let fetcher = Arc::new(Fetcher::new(&config.rpc_url));
         let decoder = Arc::new(Decoder::new());
+        let decoder_registry = Arc::new(DecoderRegistry::new());
         let handler_registry = Arc::new(HandlerRegistry::new());
 
         Ok(Self {
@@ -89,61 +92,44 @@ impl SolanaIndexer {
             storage,
             fetcher,
             decoder,
+            decoder_registry,
             handler_registry,
             schema_initializers: Vec::new(),
         })
     }
 
     /// Returns a reference to the handler registry for registering handlers.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use solana_indexer::{SolanaIndexer, SolanaIndexerConfigBuilder};
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let config = SolanaIndexerConfigBuilder::new()
-    /// #     .with_rpc("http://127.0.0.1:8899")
-    /// #     .with_database("postgresql://localhost/mydb")
-    /// #     .program_id("11111111111111111111111111111111")
-    /// #     .build()?;
-    /// let indexer = SolanaIndexer::new(config).await?;
-    /// let registry = indexer.handler_registry();
-    /// // Register handlers here
-    /// # Ok(())
-    /// # }
-    /// ```
     #[must_use]
     pub fn handler_registry(&self) -> &HandlerRegistry {
         &self.handler_registry
     }
 
+    /// Returns a mutable reference to the handler registry.
+    ///
+    /// Panics if there are multiple references to the registry.
+    pub fn handler_registry_mut(&mut self) -> &mut HandlerRegistry {
+        Arc::get_mut(&mut self.handler_registry).expect("HandlerRegistry has multiple references")
+    }
+
+    /// Returns a reference to the decoder registry.
+    #[must_use]
+    pub fn decoder_registry(&self) -> &DecoderRegistry {
+        &self.decoder_registry
+    }
+
+    /// Returns a mutable reference to the decoder registry.
+    ///
+    /// Panics if there are multiple references to the registry.
+    pub fn decoder_registry_mut(&mut self) -> &mut DecoderRegistry {
+        Arc::get_mut(&mut self.decoder_registry).expect("DecoderRegistry has multiple references")
+    }
+
     /// Registers a schema initializer.
-    ///
-    /// # Arguments
-    ///
-    /// * `initializer` - The initializer implementation
     pub fn register_schema_initializer(&mut self, initializer: Box<dyn SchemaInitializer>) {
         self.schema_initializers.push(initializer);
     }
 
     /// Returns a reference to the decoder for registering event discriminators.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use solana_indexer::{SolanaIndexer, SolanaIndexerConfigBuilder, TransferEvent};
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let config = SolanaIndexerConfigBuilder::new()
-    /// #     .with_rpc("http://127.0.0.1:8899")
-    /// #     .with_database("postgresql://localhost/mydb")
-    /// #     .program_id("11111111111111111111111111111111")
-    /// #     .build()?;
-    /// let mut indexer = SolanaIndexer::new(config).await?;
-    /// let decoder = indexer.decoder_mut();
-    /// decoder.register_event_discriminator(TransferEvent::discriminator(), "TransferEvent");
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// # Panics
     ///
@@ -157,26 +143,6 @@ impl SolanaIndexer {
     /// This method runs indefinitely, polling for new transactions,
     /// fetching and decoding them, checking for duplicates, and
     /// dispatching events to registered handlers.
-    ///
-    /// # Errors
-    ///
-    /// Returns error if a critical failure occurs that cannot be recovered.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use solana_indexer::{SolanaIndexer, SolanaIndexerConfigBuilder};
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let config = SolanaIndexerConfigBuilder::new()
-    /// #     .with_rpc("http://127.0.0.1:8899")
-    /// #     .with_database("postgresql://localhost/mydb")
-    /// #     .program_id("11111111111111111111111111111111")
-    /// #     .build()?;
-    /// let indexer = SolanaIndexer::new(config).await?;
-    /// indexer.start().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn start(self) -> Result<()> {
         println!("Starting Solana Indexer...");
         println!("Program ID: {}", self.config.program_id);
@@ -289,8 +255,34 @@ impl SolanaIndexer {
         // Fetch transaction
         let transaction = self.fetcher.fetch_transaction(signature).await?;
 
-        // Decode transaction
-        let decoded = self.decoder.decode_transaction(&transaction)?;
+        // Decode transaction metadata (slot, etc.)
+        let decoded_meta = self.decoder.decode_transaction(&transaction)?;
+
+        // Extract UI instructions from the transaction
+        let instructions = match &transaction.transaction.transaction {
+            solana_transaction_status::EncodedTransaction::Json(ui_tx) => {
+                match &ui_tx.message {
+                    solana_transaction_status::UiMessage::Parsed(msg) => &msg.instructions,
+                    _ => {
+                        return Ok(()); // Skip non-parsed transactions
+                    }
+                }
+            }
+            _ => {
+                return Ok(()); // Skip non-JSON transactions
+            }
+        };
+
+        let mut events_processed = 0;
+
+        let events = self.decoder_registry.decode_transaction(instructions);
+
+        for (discriminator, event_data) in events {
+            self.handler_registry
+                .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
+                .await?;
+            events_processed += 1;
+        }
 
         // Mark as processed
         self.storage
@@ -298,13 +290,12 @@ impl SolanaIndexer {
             .await?;
 
         // Log processing
-        println!(
-            "Processed tx {} (slot {}, {} instructions, {} events)",
-            sig_str,
-            decoded.slot,
-            decoded.instructions.len(),
-            decoded.events.len()
-        );
+        if events_processed > 0 {
+            println!(
+                "✅ Processed tx {} (slot {}, {} events)",
+                sig_str, decoded_meta.slot, events_processed
+            );
+        }
 
         Ok(())
     }
