@@ -6,6 +6,7 @@
 
 use crate::error::{Result, SolanaIndexerError};
 use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_config::RpcTransactionConfig;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::Signature;
 use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
@@ -105,8 +106,14 @@ impl Fetcher {
         tokio::task::spawn_blocking(move || {
             let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
+            let config = RpcTransactionConfig {
+                encoding: Some(UiTransactionEncoding::Json),
+                commitment: Some(CommitmentConfig::confirmed()),
+                max_supported_transaction_version: Some(0),
+            };
+
             rpc_client
-                .get_transaction(&sig, UiTransactionEncoding::Json)
+                .get_transaction_with_config(&sig, config)
                 .map_err(|e| {
                     SolanaIndexerError::RpcError(format!("Failed to fetch transaction {sig}: {e}"))
                 })
@@ -172,8 +179,13 @@ impl Fetcher {
             let results: Vec<Result<EncodedConfirmedTransactionWithStatusMeta>> = sigs
                 .par_iter()
                 .map(|sig| {
+                    let config = RpcTransactionConfig {
+                        encoding: Some(UiTransactionEncoding::Json),
+                        commitment: Some(CommitmentConfig::confirmed()),
+                        max_supported_transaction_version: Some(0),
+                    };
                     rpc_client
-                        .get_transaction(sig, UiTransactionEncoding::Json)
+                        .get_transaction_with_config(sig, config)
                         .map_err(|e| {
                             SolanaIndexerError::RpcError(format!(
                                 "Failed to fetch transaction {sig}: {e}"
