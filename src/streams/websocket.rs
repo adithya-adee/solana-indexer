@@ -13,12 +13,31 @@ use tokio::time::{Duration, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use super::TransactionSource;
-use crate::common::error::{Result, SolanaIndexerError};
+use crate::utils::error::{Result, SolanaIndexerError};
 
-/// WebSocket transaction source
+/// WebSocket-based input source for acquiring transaction signatures.
 ///
-/// Connects to Solana's WebSocket RPC and subscribes to program notifications.
-/// Automatically handles reconnection on disconnect.
+/// The `WebSocketSource` subscribes to a Solana RPC WebSocket endpoint for
+/// real-time notifications of new transactions related to a specific program ID.
+/// This is ideal for production environments requiring low latency and high throughput.
+///
+/// # Example
+///
+/// ```no_run
+/// use solana_indexer::streams::websocket::WebSocketSource;
+/// use solana_sdk::pubkey::Pubkey;
+/// use std::str::FromStr;
+///
+/// # async fn example() {
+/// let config = SolanaIndexerConfigBuilder::new()
+///     .with_ws("ws://127.0.0.1:8900")
+///     .with_database("postgresql://localhost/db")
+///     .program_id("11111111111111111111111111111111")
+///     .build()?;
+/// let program_id = Pubkey::from_str("11111111111111111111111111111111").unwrap();
+/// let source = WebSocketSource::new("ws://127.0.0.1:8900", program_id, 5);
+/// # }
+/// ```
 pub struct WebSocketSource {
     /// WebSocket URL (ws:// or wss://)
     ws_url: String,
@@ -68,13 +87,25 @@ struct SubscriptionResponse {
 }
 
 impl WebSocketSource {
-    /// Creates a new WebSocket source
+    /// Creates a new `WebSocketSource` instance.
     ///
     /// # Arguments
     ///
-    /// * `ws_url` - WebSocket URL (e.g., "ws://127.0.0.1:8900")
-    /// * `program_id` - Program ID to subscribe to
-    /// * `reconnect_delay_secs` - Delay between reconnection attempts
+    /// * `ws_url` - The WebSocket URL (e.g., "ws://127.0.0.1:8900")
+    /// * `program_id` - The program ID to monitor for notifications
+    /// * `reconnect_delay_secs` - Seconds to wait before reconnecting after a disconnect
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use solana_indexer::streams::websocket::WebSocketSource;
+    /// # use solana_sdk::pubkey::Pubkey;
+    /// let source = WebSocketSource::new(
+    ///     "ws://api.mainnet-beta.solana.com",
+    ///     Pubkey::default(),
+    ///     5
+    /// );
+    /// ```
     pub fn new(ws_url: impl Into<String>, program_id: Pubkey, reconnect_delay_secs: u64) -> Self {
         Self {
             ws_url: ws_url.into(),
@@ -86,7 +117,7 @@ impl WebSocketSource {
 
     /// Connects to WebSocket and subscribes to program notifications
     async fn connect(&mut self) -> Result<()> {
-        use crate::common::logging;
+        use crate::utils::logging;
 
         logging::log(
             logging::LogLevel::Info,
@@ -170,7 +201,7 @@ impl WebSocketSource {
             WebSocketState::Connected { receiver, .. } => {
                 // Check if receiver is still alive
                 if receiver.is_closed() {
-                    use crate::common::logging;
+                    use crate::utils::logging;
                     logging::log(
                         logging::LogLevel::Warning,
                         "WebSocket disconnected, reconnecting...",

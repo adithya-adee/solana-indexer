@@ -3,18 +3,14 @@
 //! This module provides the `SolanaIndexer` struct that orchestrates the complete
 //! indexing pipeline: polling, fetching, decoding, deduplication, and event handling.
 
-use crate::common::config::SourceConfig;
+use crate::config::SourceConfig;
 use crate::{
-    common::{
-        config::SolanaIndexerConfig,
-        error::Result,
-        traits::{HandlerRegistry, SchemaInitializer},
-    },
-    decoder::Decoder,
-    decoder_registry::DecoderRegistry,
-    fetcher::Fetcher,
-    sources::{TransactionSource, websocket::WebSocketSource},
+    config::SolanaIndexerConfig,
+    core::{decoder::Decoder, fetcher::Fetcher, registry::DecoderRegistry},
     storage::Storage,
+    streams::{TransactionSource, websocket::WebSocketSource},
+    types::traits::{HandlerRegistry, SchemaInitializer},
+    utils::{error::Result, logging},
 };
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
@@ -154,8 +150,6 @@ impl SolanaIndexer {
 
     /// Internal method to run the RPC polling loop.
     async fn process_rpc_source(self) -> Result<()> {
-        use crate::common::logging;
-
         // Display startup banner
         logging::log_startup(
             &self.config.program_id.to_string(),
@@ -197,8 +191,6 @@ impl SolanaIndexer {
 
     /// Internal method to run the WebSocket subscription loop.
     async fn process_websocket_source(self) -> Result<()> {
-        use crate::common::logging;
-
         // Display startup banner
         logging::log_startup(
             &self.config.program_id.to_string(),
@@ -221,7 +213,7 @@ impl SolanaIndexer {
                 ..
             } => (ws_url.clone(), *reconnect_delay_secs),
             _ => {
-                return Err(crate::common::error::SolanaIndexerError::ConfigError(
+                return Err(crate::utils::error::SolanaIndexerError::ConfigError(
                     "Invalid source config".to_string(),
                 ));
             }
@@ -274,9 +266,8 @@ impl SolanaIndexer {
 
     #[allow(clippy::unused_async)]
     async fn process_helius_source(self) -> Result<()> {
-        use crate::common::logging;
         logging::log_error("Helius source", "Not implemented yet");
-        Err(crate::common::error::SolanaIndexerError::ConfigError(
+        Err(crate::utils::error::SolanaIndexerError::ConfigError(
             "Helius source not implemented".to_string(),
         ))
     }
@@ -341,7 +332,7 @@ impl SolanaIndexer {
                         commitment: Some(CommitmentConfig::confirmed()),
                     },
                 )
-                .map_err(|e| crate::common::error::SolanaIndexerError::RpcError(e.to_string()))?;
+                .map_err(|e| crate::utils::error::SolanaIndexerError::RpcError(e.to_string()))?;
 
             let signatures: Vec<Signature> = sigs
                 .into_iter()
@@ -351,7 +342,7 @@ impl SolanaIndexer {
             Ok(signatures)
         })
         .await
-        .map_err(|e| crate::common::error::SolanaIndexerError::InternalError(e.to_string()))?
+        .map_err(|e| crate::utils::error::SolanaIndexerError::InternalError(e.to_string()))?
     }
 
     async fn process_transaction(&self, signature: &Signature) -> Result<()> {
@@ -396,7 +387,7 @@ impl SolanaIndexer {
 
         // Log processing with colorful output
         if events_processed > 0 {
-            crate::common::logging::log_transaction(&sig_str, decoded_meta.slot, events_processed);
+            crate::utils::logging::log_transaction(&sig_str, decoded_meta.slot, events_processed);
         }
 
         Ok(())
@@ -406,7 +397,7 @@ impl SolanaIndexer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::config::SolanaIndexerConfigBuilder;
+    use crate::config::SolanaIndexerConfigBuilder;
 
     #[tokio::test]
     async fn test_indexer_creation_rpc() {

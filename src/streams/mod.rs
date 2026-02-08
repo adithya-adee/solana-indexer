@@ -5,7 +5,7 @@
 //!
 //! The `TransactionSource` trait provides a unified interface for both approaches.
 
-use crate::common::error::Result;
+use crate::utils::error::Result;
 use async_trait::async_trait;
 use solana_sdk::signature::Signature;
 

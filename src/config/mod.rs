@@ -3,7 +3,7 @@
 //! This module provides a flexible configuration system using the builder pattern,
 //! allowing developers to configure `SolanaIndexer` with type safety and discoverability.
 
-use crate::common::error::{Result, SolanaIndexerError};
+use crate::utils::error::{Result, SolanaIndexerError};
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 

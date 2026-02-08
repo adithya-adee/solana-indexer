@@ -4,13 +4,16 @@
 //! type-safe Rust objects. It supports IDL-driven decoding for program-specific
 //! events and instructions, as well as common Solana instruction types.
 
-use crate::common::error::{Result, SolanaIndexerError};
+use crate::utils::error::{Result, SolanaIndexerError};
 use solana_sdk::pubkey::Pubkey;
 use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, UiInstruction, UiMessage,
     UiParsedInstruction,
 };
 use std::collections::HashMap;
+
+// pub mod registry; // Removed, now a sibling in core
+// pub use registry::DecoderRegistry; // Removed, exported from core/mod.rs
 
 /// Transaction decoder for parsing Solana transaction data.
 ///

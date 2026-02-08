@@ -4,7 +4,7 @@
 //! Solana RPC endpoints. It takes transaction signatures and fetches the
 //! complete transaction data including instruction details, logs, and metadata.
 
-use crate::common::error::{Result, SolanaIndexerError};
+use crate::utils::error::{Result, SolanaIndexerError};
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcTransactionConfig;
 use solana_sdk::commitment_config::CommitmentConfig;

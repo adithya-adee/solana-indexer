@@ -1,6 +1,6 @@
 //! Decoder registry for managing instruction decoders.
 
-use crate::common::traits::DynamicInstructionDecoder;
+use crate::types::traits::DynamicInstructionDecoder;
 use solana_transaction_status::UiInstruction;
 use std::collections::HashMap;
 

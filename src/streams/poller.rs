@@ -3,10 +3,10 @@
 //! This module implements a polling strategy that periodically queries
 //! Solana RPC endpoints for new transaction signatures.
 
-use crate::common::config::SolanaIndexerConfig;
-use crate::common::error::{Result, SolanaIndexerError};
-use crate::decoder::Decoder;
-use crate::fetcher::Fetcher;
+use crate::config::SolanaIndexerConfig;
+use crate::core::decoder::Decoder;
+use crate::core::fetcher::Fetcher;
+use crate::utils::error::{Result, SolanaIndexerError};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::Signature;
@@ -266,7 +266,7 @@ mod tests {
             program_id: solana_sdk::pubkey::Pubkey::default(),
             poll_interval_secs: 5,
             batch_size: 100,
-            source: crate::common::config::SourceConfig::Rpc {
+            source: crate::config::SourceConfig::Rpc {
                 rpc_url: "http://127.0.0.1:8899".to_string(),
                 poll_interval_secs: 5,
                 batch_size: 100,

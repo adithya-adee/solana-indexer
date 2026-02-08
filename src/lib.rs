@@ -126,31 +126,30 @@
 #![allow(clippy::module_name_repetitions)]
 
 // Public API exports
-pub use common::config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
-pub use common::error::{Result, SolanaIndexerError};
-pub use common::macros::{
-    Idl, IdlAccount, IdlAccountItem, IdlEvent, IdlField, IdlInstruction, IdlType,
-    IdlTypeDefinition, generate_event_struct, idl_type_to_rust,
+pub use config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
+pub use core::decoder::{DecodedTransaction, Decoder, EventType, InstructionInfo, ParsedEvent};
+pub use core::fetcher::Fetcher;
+pub use core::indexer::SolanaIndexer;
+pub use core::registry::DecoderRegistry;
+pub use storage::Storage;
+pub use streams::poller::Poller;
+pub use types::events::{
+    DepositEvent, EventDiscriminator, TransferEvent, WithdrawEvent, calculate_discriminator,
 };
-pub use common::traits::{
+pub use types::traits::{
     DynamicEventHandler, DynamicInstructionDecoder, EventHandler, HandlerRegistry,
     InstructionDecoder, SchemaInitializer,
 };
-pub use common::types::{
-    DepositEvent, EventDiscriminator, TransferEvent, WithdrawEvent, calculate_discriminator,
+pub use utils::error::{Result, SolanaIndexerError};
+pub use utils::macros::{
+    Idl, IdlAccount, IdlAccountItem, IdlEvent, IdlField, IdlInstruction, IdlType,
+    IdlTypeDefinition, generate_event_struct, idl_type_to_rust,
 };
-pub use decoder::{DecodedTransaction, Decoder, EventType, InstructionInfo, ParsedEvent};
-pub use decoder_registry::DecoderRegistry;
-pub use fetcher::Fetcher;
-pub use indexer::SolanaIndexer;
-pub use sources::poller::Poller;
-pub use storage::Storage;
 
 // Module declarations
-pub mod common;
-pub mod decoder;
-pub mod decoder_registry;
-pub mod fetcher;
-pub mod indexer;
-pub mod sources;
+pub mod config;
+pub mod core;
 pub mod storage;
+pub mod streams;
+pub mod types;
+pub mod utils;

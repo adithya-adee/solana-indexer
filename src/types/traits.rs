@@ -4,8 +4,8 @@
 //! the `EventHandler` trait. Developers implement this trait to define custom
 //! business logic for processing decoded events and transactions.
 
-use crate::common::error::{Result, SolanaIndexerError};
-use crate::common::types::EventDiscriminator;
+use crate::types::events::EventDiscriminator;
+use crate::utils::error::{Result, SolanaIndexerError};
 use async_trait::async_trait;
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_transaction_status::UiInstruction;
