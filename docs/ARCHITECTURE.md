@@ -1,10 +1,15 @@
 # Solana Indexer Architecture
 
-**Build Philosophy:** SolanaIndexer is designed as a developer-centric SDK for Solana data indexing. Our philosophy is to provide a highly extensible, reliable, and secure platform that prioritizes a seamless developer experience (DX) while offering a clear path from local development to production-grade deployments. We start with foundational reliability on localnet and strategically integrate production-ready features.
+**Build Philosophy:** SolanaIndexer is designed as a developer-centric SDK for Solana data indexing. Our philosophy is to provide a highly extensible, reliable, and secure platform that prioritizes a seamless developer experience (DX) while offering a clear path from local development to production-grade deployments. We solve the "boring problems" (polling loops, RPC connections, signature fetching, idempotency) so developers can focus on their unique business logic.
 
-## 1. Core System Architecture: Event-Driven Pipeline
+## 1. Core System Architecture: Flexible Event-Driven Pipeline
 
-SolanaIndexer operates on an event-driven pipeline model, designed for flexibility in data acquisition and processing. This architecture ensures modularity, allowing developers to choose input sources and define custom handling logic.
+SolanaIndexer operates on a flexible event-driven pipeline model with **two key extension points** for developers:
+
+1. **`InstructionDecoder<T>`**: Custom instruction parsing (raw bytes → typed events)
+2. **`EventHandler<T>`**: Custom event processing (typed events → business logic)
+
+This separation of concerns allows developers to build indexers for any use case—from general SPL token transfers to complex custom program logic—while the SDK handles all infrastructure concerns.
 
 ### Data Flow Overview
 
@@ -14,46 +19,97 @@ The core pipeline consists of the following stages:
     *   **Poller:** Periodically queries Solana RPC endpoints for new transaction signatures (e.g., `getSignaturesForAddress`). Ideal for localnet and lower-throughput scenarios.
     *   **Subscriber:** Listens for real-time transaction events via WebSocket connections (e.g., `programSubscribe`). Essential for high-throughput, low-latency production environments.
 2.  **Fetcher:** For each identified new transaction signature, it retrieves the full transaction details (e.g., `getTransaction`). This includes instruction data, logs, and metadata.
-3.  **Decoder:** Parses the raw transaction data.
-    *   Utilizes automatically generated Rust structs from the program's IDL (Interface Definition Language) to interpret instruction data and emitted events into strongly-typed Rust objects. This stage ensures type safety and reduces boilerplate for developers.
-    *   Handles common Solana transaction types (e.g., SPL Token Program instructions) even without a specific program IDL, allowing for general-purpose indexing.
-4.  **Idempotency Tracker:** Before processing, checks a persistent store (`_solana_indexer_processed` table) to prevent re-processing already handled transactions. This ensures data consistency and reliability.
-5.  **Handler:** Executes user-defined business logic.
-    *   This is where the developer's custom code integrates. For each decoded event or instruction, the SDK invokes a registered `EventHandler` implementation.
+3.  **Idempotency Tracker:** Before processing, checks a persistent store (`_solana_indexer_processed` table) to prevent re-processing already handled transactions. This ensures data consistency and reliability.
+4.  **Decoder Registry (Developer Extension Point #1):** Routes instructions to registered `InstructionDecoder<T>` implementations.
+    *   Developers implement `InstructionDecoder<T>` to parse raw instruction data into strongly-typed event structs.
+    *   Multiple decoders can be registered for different program IDs, enabling multi-program indexing.
+    *   Decoders can use IDL-generated types (via proc macros) or custom parsing logic.
+    *   Returns `Option<T>` where `T` is the typed event struct.
+5.  **Handler Registry (Developer Extension Point #2):** Dispatches decoded events to registered `EventHandler<T>` implementations.
+    *   Developers implement `EventHandler<T>` to define custom business logic for processing events.
     *   Typical operations include database inserts, updates, external API calls, or triggering further processing.
+    *   Handlers can define custom database schemas via the `initialize_schema()` method.
 6.  **Confirmation & Persistence:** Marks the transaction signature as processed in the idempotency tracker.
 
-### Simplified Flow Diagram (Evolving)
+### Architecture Flow Diagram
 
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                    SDK Infrastructure                       │
+│                   (We Handle This)                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌───────────────────────┐
-│ Solana Network        │
-│ RPC / WebSocket       │
+│ Solana Network        │  ← RPC / WebSocket / Helius
+│ (RPC Endpoint)        │
 └───────────┬───────────┘
             │
             ▼
 ┌──────────────────────────────────────┐
-│ SolanaIndexer Core Loop                  │
-│ (Potentially Multi-threaded/Async)   │
-│                                      │
-│  1. Input Source (Poller/Subscriber) │
-│  2. Fetch transaction data           │
-│  3. Decode via IDL/Known Structures  │
-│  4. Check idempotency table          │
-│  5. Call user-defined EventHandler   │
-│  6. Mark signature as processed      │
+│ 1. Input Source                      │  ← Poller / Subscriber
+│    • Fetch new signatures            │
+│    • Handle retries & rate limits    │
+└───────────┬──────────────────────────┘
+            │
+            ▼
+┌──────────────────────────────────────┐
+│ 2. Transaction Fetcher               │
+│    • Fetch full transaction details  │
+│    • Extract instructions            │
+└───────────┬──────────────────────────┘
+            │
+            ▼
+┌──────────────────────────────────────┐
+│ 3. Idempotency Check                 │
+│    • Skip if already processed       │
+└───────────┬──────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Developer Extension Point #1                    │
+│                                                              │
+│ 4. Decoder Registry                                          │
+│    ┌──────────────────────────────────────────────┐        │
+│    │ InstructionDecoder<T>                        │        │
+│    │ • Developer implements custom parsing        │        │
+│    │ • UiInstruction → Option<T>                  │        │
+│    │ • Can use IDL-generated types                │        │
+│    └──────────────────────────────────────────────┘        │
+│                                                              │
+│    Output: Vec<(discriminator, event_data)>                 │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Developer Extension Point #2                    │
+│                                                              │
+│ 5. Handler Registry                                          │
+│    ┌──────────────────────────────────────────────┐        │
+│    │ EventHandler<T>                              │        │
+│    │ • Developer implements business logic        │        │
+│    │ • T → Database/API/Custom Actions            │        │
+│    │ • initialize_schema() for DB setup           │        │
+│    └──────────────────────────────────────────────┘        │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────┐
+│ 6. Mark as Processed                 │
+│    • Update idempotency tracker      │
 └───────────┬──────────────────────────┘
             │
             ▼
 ┌───────────────────────┐
 │ External Services     │
-│                       │
-│ • Database (Postgres/ │
-│   Supabase)           │
-│ • Other APIs          │
-│ • Analytics Platforms │
+│ • PostgreSQL          │
+│ • Supabase            │
+│ • Custom APIs         │
+│ • Analytics           │
 └───────────────────────┘
 ```
+
+**Key Insight:** Developers only implement the two extension points (`InstructionDecoder<T>` and `EventHandler<T>`). The SDK handles everything else.
 
 ## 2. Configuration Management
 
@@ -120,39 +176,214 @@ A cornerstone of SolanaIndexer's DX is its ability to transform Solana program I
 
 For scenarios where a specific program IDL isn't available or desired (e.g., indexing generic SPL Token transfers), SolanaIndexer's `Decoder` can also interpret common instruction types by directly parsing their known byte layouts. This provides flexibility but requires the SDK to maintain knowledge of these specific instruction formats.
 
-## 5. Extensibility: The `EventHandler` Trait (Custom Logic Injection)
+## 5. Extensibility: Developer Extension Points
 
-The `EventHandler` trait is SolanaIndexer's primary extension point, enabling developers to inject their custom business logic cleanly and efficiently.
+SolanaIndexer provides two primary extension points that enable developers to inject custom logic cleanly and efficiently:
+
+### Extension Point #1: `InstructionDecoder<T>` (Custom Instruction Parsing)
+
+The `InstructionDecoder<T>` trait allows developers to define how raw Solana instructions are parsed into typed event structures.
+
+```rust
+/// Generic instruction decoder trait for custom parsing logic.
+///
+/// Developers implement this trait to define how raw Solana instructions
+/// are parsed into typed event structures.
+pub trait InstructionDecoder<T>: Send + Sync {
+    /// Decodes a Solana instruction into a typed event.
+    ///
+    /// # Arguments
+    /// * `instruction` - The UI instruction from the transaction
+    ///
+    /// # Returns
+    /// * `Some(T)` - Successfully decoded event
+    /// * `None` - Instruction doesn't match or failed to decode
+    fn decode(&self, instruction: &UiInstruction) -> Option<T>;
+}
+```
+
+**Key Features:**
+- **Generic over Event Type `T`**: Developers can implement decoders for any event struct they define
+- **Flexible Parsing**: Can use IDL-generated types, Anchor deserialization, or custom byte parsing
+- **Multi-Program Support**: Register different decoders for different program IDs
+- **Type Safety**: Returns `Option<T>` ensuring compile-time correctness
+
+**Example: SPL Token Transfer Decoder**
+```rust
+pub struct SplTransferDecoder;
+
+impl InstructionDecoder<TransferEvent> for SplTransferDecoder {
+    fn decode(&self, instruction: &UiInstruction) -> Option<TransferEvent> {
+        // 1. Check if instruction is for SPL Token program
+        // 2. Parse instruction data to identify transfer type
+        // 3. Extract accounts and amounts
+        // 4. Return TransferEvent if successful
+        
+        match instruction {
+            UiInstruction::Parsed(parsed) => {
+                if parsed.program == "spl-token" && parsed.parsed["type"] == "transfer" {
+                    Some(TransferEvent {
+                        from: parse_pubkey(&parsed.parsed["info"]["source"]),
+                        to: parse_pubkey(&parsed.parsed["info"]["destination"]),
+                        amount: parsed.parsed["info"]["amount"].as_u64()?,
+                        mint: parse_pubkey(&parsed.parsed["info"]["mint"]),
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+```
+
+**Example: Custom Program Decoder with IDL**
+```rust
+// Using IDL-generated types
+pub struct MyProgramDecoder;
+
+impl InstructionDecoder<DepositEvent> for MyProgramDecoder {
+    fn decode(&self, instruction: &UiInstruction) -> Option<DepositEvent> {
+        // Use anchor_lang to deserialize instruction data
+        let data = instruction.data()?;
+        
+        // Check instruction discriminator (first 8 bytes)
+        if &data[..8] == DEPOSIT_DISCRIMINATOR {
+            // Deserialize using Borsh
+            DepositEvent::try_from_slice(&data[8..]).ok()
+        } else {
+            None
+        }
+    }
+}
+```
+
+**Registration:**
+```rust
+SolanaIndexer::new()
+    .register_decoder(SPL_TOKEN_PROGRAM_ID, Box::new(SplTransferDecoder))
+    .register_decoder(MY_PROGRAM_ID, Box::new(MyProgramDecoder))
+    // ... rest of configuration
+```
+
+### Extension Point #2: `EventHandler<T>` (Custom Event Processing)
+
+The `EventHandler<T>` trait is where developers define their business logic for processing decoded events.
 
 ```rust
 #[async_trait]
 pub trait EventHandler<T>: Send + Sync + 'static {
-    async fn handle(&self, event: T, db: &PgPool, signature: &str)
-        -> Result<(), SolanaIndexerError>;
+    /// Initializes custom database schema for this handler.
+    ///
+    /// Override this method to create custom tables. Called once
+    /// during indexer startup.
+    ///
+    /// # Default Implementation
+    /// Does nothing (no-op).
+    async fn initialize_schema(&self, _db: &PgPool) -> Result<()> {
+        Ok(())
+    }
+
+    /// Handles a decoded event.
+    ///
+    /// # Arguments
+    /// * `event` - The typed event to process
+    /// * `db` - Database connection pool
+    /// * `signature` - Transaction signature for tracking
+    async fn handle(&self, event: T, db: &PgPool, signature: &str) -> Result<()>;
 }
 ```
 
-*   **Generic for Any Event `T`:** The trait is generic over `T`, meaning developers can implement `EventHandler` for *any* event `struct` (typically a generated event type from an IDL) they wish to process.
-*   **`handle` Method:** This `async` method is where all custom logic resides.
-    *   `event: T`: The strongly-typed, deserialized event object from the blockchain.
-    *   `db: &PgPool`: A database connection pool (e.g., `sqlx::PgPool`), providing a convenient way to interact with a persistent store.
-    *   `signature: &str`: The transaction signature, useful for logging, linking, or debugging.
-*   **SDK Invocation:** The SolanaIndexer core loop, after decoding a transaction and identifying an event of type `T`, automatically finds the developer-registered `EventHandler<T>` instance and calls its `handle` method. This abstraction means developers only focus on *what* to do with the data, not *how* to acquire or decode it.
+**Key Features:**
+- **Generic over Event Type `T`**: Type-safe handling of specific event structures
+- **Schema Initialization**: Optional `initialize_schema()` method for custom database setup
+- **Async Processing**: Full async/await support for database operations and API calls
+- **Database Access**: Provided `PgPool` for persistence operations
+- **Transaction Context**: Access to transaction signature for logging and tracking
 
-### Custom Database Schemas (SchemaInitializer)
-
-In addition to event handling, developers can define custom database tables tailored to their application's needs using the `SchemaInitializer` trait.
-
+**Example: Transfer Event Handler**
 ```rust
+pub struct TransferHandler;
+
 #[async_trait]
-pub trait SchemaInitializer: Send + Sync {
-    async fn initialize(&self, db: &PgPool) -> Result<()>;
+impl EventHandler<TransferEvent> for TransferHandler {
+    /// Create the transfers table on startup
+    async fn initialize_schema(&self, db: &PgPool) -> Result<()> {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS spl_transfers (
+                signature TEXT PRIMARY KEY,
+                from_wallet TEXT NOT NULL,
+                to_wallet TEXT NOT NULL,
+                amount BIGINT NOT NULL,
+                mint TEXT NOT NULL,
+                indexed_at TIMESTAMPTZ DEFAULT NOW()
+            )"
+        )
+        .execute(db)
+        .await?;
+        
+        Ok(())
+    }
+
+    /// Process each transfer event
+    async fn handle(
+        &self,
+        event: TransferEvent,
+        db: &PgPool,
+        signature: &str,
+    ) -> Result<()> {
+        println!(
+            "Processing Transfer: {} -> {} ({} tokens)",
+            event.from, event.to, event.amount
+        );
+
+        sqlx::query!(
+            "INSERT INTO spl_transfers (signature, from_wallet, to_wallet, amount, mint)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (signature) DO NOTHING",
+            signature,
+            event.from.to_string(),
+            event.to.to_string(),
+            event.amount as i64,
+            event.mint.to_string()
+        )
+        .execute(db)
+        .await?;
+
+        Ok(())
+    }
 }
 ```
 
-*   **Custom Setup:** Implement this trait to execute SQL commands (e.g., `CREATE TABLE IF NOT EXISTS`) when the indexer starts.
-*   **Registration:** Register your initializer via `.register_schema_initializer(Box::new(MyInitializer))`.
-*   **Automatic Execution:** The indexer ensures these initializations run during startup, guaranteeing that required tables exist before processing begins.
+**Registration:**
+```rust
+SolanaIndexer::new()
+    .register_handler::<TransferEvent>(TransferHandler)
+    .register_handler::<DepositEvent>(DepositHandler)
+    // ... rest of configuration
+```
+
+### How They Work Together
+
+```
+Transaction → InstructionDecoder<T> → Option<T> → EventHandler<T> → Database/API
+              (Developer defines      (Typed     (Developer defines
+               parsing logic)          Event)     business logic)
+```
+
+1. **SDK fetches transaction** from Solana network
+2. **Decoder Registry routes** instructions to appropriate `InstructionDecoder<T>`
+3. **Developer's decoder** parses raw bytes into typed event `T`
+4. **Handler Registry dispatches** event to appropriate `EventHandler<T>`
+5. **Developer's handler** processes event (database writes, API calls, etc.)
+6. **SDK marks transaction** as processed in idempotency tracker
+
+This separation allows developers to:
+- **Reuse decoders** across multiple handlers
+- **Test parsing logic** independently from business logic
+- **Mix and match** different decoders and handlers
+- **Support multiple programs** in a single indexer instance
 
 ## 6. Reliability & Error Handling
 
@@ -251,7 +482,44 @@ PROGRAM_ID=YourProgramPublicKey111111111111111111111
 
 For production, these should be explicit environment variables.
 
-### Step 2: Implement Your EventHandler
+### Step 2: Define Your Event Structure
+
+```rust
+use borsh::{BorshSerialize, BorshDeserialize};
+use solana_indexer::{EventDiscriminator, calculate_discriminator};
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub struct TransferEvent {
+    pub from: String,
+    pub to: String,
+    pub amount: u64,
+}
+
+impl EventDiscriminator for TransferEvent {
+    fn discriminator() -> [u8; 8] {
+        calculate_discriminator("TransferEvent")
+    }
+}
+```
+
+### Step 3: Implement Your InstructionDecoder
+
+```rust
+use solana_indexer::InstructionDecoder;
+use solana_transaction_status::UiInstruction;
+
+pub struct MyDecoder;
+
+impl InstructionDecoder<TransferEvent> for MyDecoder {
+    fn decode(&self, instruction: &UiInstruction) -> Option<TransferEvent> {
+        // Parse instruction data and return TransferEvent if successful
+        // Return None if instruction doesn't match
+        todo!("Implement your custom parsing logic")
+    }
+}
+```
+
+### Step 4: Implement Your EventHandler
 
 ```rust
 use solana_indexer::{EventHandler, SolanaIndexerError};
@@ -297,7 +565,7 @@ impl EventHandler<TransferEvent> for MyTransferHandler {
 }
 ```
 
-### Step 3: Initialize and Run SolanaIndexer
+### Step 5: Initialize and Run SolanaIndexer
 
 ```rust
 use solana_indexer::{EventHandler, SolanaIndexer, SolanaIndexerError};
@@ -349,14 +617,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let program_id_str = env::var("PROGRAM_ID")
         .map_err(|e| Box::new(SolanaIndexerError::ConfigError(e)) as Box<dyn Error>)?;
 
-    // Initialize SolanaIndexer with the provided configuration and registers
-    // the custom event handler.
+    // Initialize SolanaIndexer with the provided configuration.
+    // Register both the decoder (for parsing) and handler (for processing).
     // The `SolanaIndexer::new()` builder pattern allows for flexible
     // and type-safe configuration.
     SolanaIndexer::new()
         .with_rpc(&rpc_url)
         .with_database(&database_url)
-        .program_id(&program_id_str)
+        .register_decoder(&program_id_str, Box::new(MyDecoder))
         .register_handler::<TransferEvent>(MyTransferHandler)
         .start_polling() // Initiates the polling-based indexing process.
         .await
