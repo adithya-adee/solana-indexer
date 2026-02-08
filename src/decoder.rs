@@ -120,7 +120,7 @@ impl Decoder {
         let mut events = Vec::new();
 
         for log in logs {
-            if let Some(event) = self.parse_single_log(log)? {
+            if let Some(event) = Self::parse_single_log(log) {
                 events.push(event);
             }
         }
@@ -129,44 +129,44 @@ impl Decoder {
     }
 
     /// Parses a single log message.
-    fn parse_single_log(&self, log: &str) -> Result<Option<ParsedEvent>> {
+    fn parse_single_log(log: &str) -> Option<ParsedEvent> {
         // Program invocation
-        if log.contains("invoke [") {
-            if let Some(program_id) = self.extract_program_id(log) {
-                return Ok(Some(ParsedEvent {
-                    event_type: EventType::ProgramInvoke,
-                    program_id: Some(program_id),
-                    data: None,
-                }));
-            }
+        if log.contains("invoke [")
+            && let Some(program_id) = Self::extract_program_id(log)
+        {
+            return Some(ParsedEvent {
+                event_type: EventType::ProgramInvoke,
+                program_id: Some(program_id),
+                data: None,
+            });
         }
 
         // Program data log (potential event)
         if log.starts_with("Program data: ") {
             let data = log.strip_prefix("Program data: ").unwrap_or("");
-            return Ok(Some(ParsedEvent {
+            return Some(ParsedEvent {
                 event_type: EventType::ProgramData,
                 program_id: None,
                 data: Some(data.to_string()),
-            }));
+            });
         }
 
         // Program log (instruction or custom message)
         if log.starts_with("Program log: ") {
             let message = log.strip_prefix("Program log: ").unwrap_or("");
-            return Ok(Some(ParsedEvent {
+            return Some(ParsedEvent {
                 event_type: EventType::ProgramLog,
                 program_id: None,
                 data: Some(message.to_string()),
-            }));
+            });
         }
 
         // No event found in this log
-        Ok(None)
+        None
     }
 
     /// Extracts program ID from an invocation log.
-    fn extract_program_id(&self, log: &str) -> Option<Pubkey> {
+    fn extract_program_id(log: &str) -> Option<Pubkey> {
         // Format: "Program <pubkey> invoke [<depth>]"
         let parts: Vec<&str> = log.split_whitespace().collect();
         if parts.len() >= 2 && parts[0] == "Program" {
@@ -241,7 +241,7 @@ impl Decoder {
         let events = self.parse_event_logs(&logs)?;
 
         // Extract instructions
-        let instructions = self.extract_instructions(&transaction.transaction.transaction)?;
+        let instructions = Self::extract_instructions(&transaction.transaction.transaction)?;
 
         // Extract compute units consumed
         let compute_units_consumed = transaction.transaction.meta.as_ref().and_then(|meta| {
@@ -265,10 +265,7 @@ impl Decoder {
     }
 
     /// Extracts instructions from an encoded transaction.
-    fn extract_instructions(
-        &self,
-        transaction: &EncodedTransaction,
-    ) -> Result<Vec<InstructionInfo>> {
+    fn extract_instructions(transaction: &EncodedTransaction) -> Result<Vec<InstructionInfo>> {
         let mut instructions = Vec::new();
 
         // Decode the transaction to access its message
@@ -298,7 +295,7 @@ impl Decoder {
                                     index: idx,
                                 });
                             }
-                            _ => {}
+                            UiInstruction::Parsed(_) => {}
                         }
                     }
                 }
@@ -409,10 +406,9 @@ mod tests {
 
     #[test]
     fn test_parse_program_invoke_log() {
-        let decoder = Decoder::new();
         let log = "Program 11111111111111111111111111111111 invoke [1]";
 
-        let event = decoder.parse_single_log(log).unwrap();
+        let event = Decoder::parse_single_log(log);
         assert!(event.is_some());
 
         let event = event.unwrap();
@@ -422,10 +418,9 @@ mod tests {
 
     #[test]
     fn test_parse_program_data_log() {
-        let decoder = Decoder::new();
         let log = "Program data: SGVsbG8gV29ybGQ=";
 
-        let event = decoder.parse_single_log(log).unwrap();
+        let event = Decoder::parse_single_log(log);
         assert!(event.is_some());
 
         let event = event.unwrap();
@@ -435,10 +430,9 @@ mod tests {
 
     #[test]
     fn test_parse_program_log() {
-        let decoder = Decoder::new();
         let log = "Program log: Instruction: Transfer";
 
-        let event = decoder.parse_single_log(log).unwrap();
+        let event = Decoder::parse_single_log(log);
         assert!(event.is_some());
 
         let event = event.unwrap();

@@ -230,13 +230,14 @@ impl Idl {
 #[must_use]
 pub fn idl_type_to_rust(idl_type: &str) -> String {
     match idl_type {
-        "u8" | "u16" | "u32" | "u64" | "u128" => idl_type.to_string(),
-        "i8" | "i16" | "i32" | "i64" | "i128" => idl_type.to_string(),
+        "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {
+            idl_type.to_string()
+        }
         "bool" => "bool".to_string(),
         "string" => "String".to_string(),
         "publicKey" => "Pubkey".to_string(),
         "bytes" => "Vec<u8>".to_string(),
-        _ => format!("/* Unknown type: {} */", idl_type),
+        _ => format!("/* Unknown type: {idl_type} */"),
     }
 }
 
@@ -275,6 +276,7 @@ pub fn idl_type_to_rust(idl_type: &str) -> String {
 /// assert!(struct_code.contains("pub amount: u64"));
 /// ```
 #[must_use]
+#[allow(clippy::format_push_string, clippy::useless_format)]
 pub fn generate_event_struct(event: &IdlEvent) -> String {
     let mut code = String::new();
 

@@ -39,7 +39,7 @@ pub fn calculate_discriminator(event_name: &str) -> [u8; 8] {
     discriminator
 }
 
-/// Example generated event type: TransferEvent
+/// Example generated event type: `TransferEvent`
 ///
 /// This represents a token transfer event that might be emitted by a
 /// Solana program. In a real implementation, this would be automatically
@@ -69,7 +69,7 @@ pub struct TransferEvent {
 }
 
 impl TransferEvent {
-    /// Returns the event discriminator for TransferEvent.
+    /// Returns the event discriminator for `TransferEvent`.
     ///
     /// # Example
     ///
@@ -85,9 +85,9 @@ impl TransferEvent {
     }
 }
 
-/// Example generated event type: DepositEvent
+/// Example generated event type: `DepositEvent`
 ///
-/// This represents a deposit event that might be emitted by a DeFi program.
+/// This represents a deposit event that might be emitted by a `DeFi` program.
 ///
 /// # Example
 ///
@@ -113,7 +113,7 @@ pub struct DepositEvent {
 }
 
 impl DepositEvent {
-    /// Returns the event discriminator for DepositEvent.
+    /// Returns the event discriminator for `DepositEvent`.
     ///
     /// # Example
     ///
@@ -129,9 +129,9 @@ impl DepositEvent {
     }
 }
 
-/// Example generated event type: WithdrawEvent
+/// Example generated event type: `WithdrawEvent`
 ///
-/// This represents a withdrawal event that might be emitted by a DeFi program.
+/// This represents a withdrawal event that might be emitted by a `DeFi` program.
 ///
 /// # Example
 ///
@@ -157,7 +157,7 @@ pub struct WithdrawEvent {
 }
 
 impl WithdrawEvent {
-    /// Returns the event discriminator for WithdrawEvent.
+    /// Returns the event discriminator for `WithdrawEvent`.
     ///
     /// # Example
     ///

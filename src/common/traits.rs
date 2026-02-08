@@ -5,8 +5,68 @@
 //! business logic for processing decoded events and transactions.
 
 use crate::common::error::{Result, SolanaIndexerError};
+use crate::common::types::EventDiscriminator;
 use async_trait::async_trait;
+use borsh::BorshSerialize;
+use solana_transaction_status::UiInstruction;
 use sqlx::PgPool;
+
+/// Generic instruction decoder trait for custom parsing logic.
+///
+/// Developers implement this trait to define how raw Solana instructions
+/// are parsed into typed event structures.
+///
+/// # Type Parameters
+/// * `T` - The event type this decoder produces
+///
+/// # Example
+/// ```no_run
+/// use solana_indexer::InstructionDecoder;
+/// use solana_transaction_status::UiInstruction;
+///
+/// pub struct MyDecoder;
+///
+/// impl InstructionDecoder<MyEvent> for MyDecoder {
+///     fn decode(&self, instruction: &UiInstruction) -> Option<MyEvent> {
+///         // Parse instruction and return event if successful
+///         None
+///     }
+/// }
+/// ```
+pub trait InstructionDecoder<T>: Send + Sync {
+    /// Decodes a Solana instruction into a typed event.
+    ///
+    /// # Arguments
+    /// * `instruction` - The UI instruction from the transaction
+    ///
+    /// # Returns
+    /// * `Some(T)` - Successfully decoded event
+    /// * `None` - Instruction doesn't match or failed to decode
+    fn decode(&self, instruction: &UiInstruction) -> Option<T>;
+}
+
+/// Type-erased instruction decoder for internal SDK use.
+///
+/// This trait enables the SDK to store and invoke decoders of different
+/// types uniformly. Developers don't implement this directly.
+pub trait DynamicInstructionDecoder: Send + Sync {
+    /// Decodes an instruction into discriminator + raw event data.
+    fn decode_dynamic(&self, instruction: &UiInstruction) -> Option<([u8; 8], Vec<u8>)>;
+}
+
+/// Automatic conversion from typed decoder to dynamic decoder.
+impl<T> DynamicInstructionDecoder for Box<dyn InstructionDecoder<T>>
+where
+    T: EventDiscriminator + BorshSerialize + Send + Sync + 'static,
+{
+    fn decode_dynamic(&self, instruction: &UiInstruction) -> Option<([u8; 8], Vec<u8>)> {
+        self.decode(instruction).map(|event| {
+            let discriminator = T::discriminator();
+            let data = borsh::to_vec(&event).expect("Failed to serialize event");
+            (discriminator, data)
+        })
+    }
+}
 
 /// Trait for initializing custom database schemas.
 ///
@@ -129,6 +189,17 @@ pub trait EventHandler<T>: Send + Sync + 'static {
     /// }
     /// ```
     async fn handle(&self, event: T, db: &PgPool, signature: &str) -> Result<()>;
+
+    /// Initializes custom database schema for this handler.
+    ///
+    /// Override this method to create custom tables. Called once
+    /// during indexer startup.
+    ///
+    /// # Default Implementation
+    /// Does nothing (no-op).
+    async fn initialize_schema(&self, _db: &PgPool) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Type-erased event handler for dynamic dispatch.
@@ -246,8 +317,7 @@ impl HandlerRegistry {
     ) -> Result<()> {
         let handler = self.handlers.get(discriminator).ok_or_else(|| {
             SolanaIndexerError::DecodingError(format!(
-                "No handler registered for discriminator: {:?}",
-                discriminator
+                "No handler registered for discriminator: {discriminator:?}"
             ))
         })?;
 

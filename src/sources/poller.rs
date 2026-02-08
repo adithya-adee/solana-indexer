@@ -4,8 +4,8 @@
 //! Solana RPC endpoints for new transaction signatures.
 
 use crate::common::config::SolanaIndexerConfig;
-use crate::decoder::Decoder;
 use crate::common::error::{Result, SolanaIndexerError};
+use crate::decoder::Decoder;
 use crate::fetcher::Fetcher;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -220,19 +220,19 @@ impl Poller {
         let transaction = fetcher.fetch_transaction(signature).await?;
 
         // Decode transaction
-        let decoded = decoder.decode_transaction(&transaction)?;
+        let decoded_tx = decoder.decode_transaction(&transaction)?;
 
         // Log decoded information
-        println!("  Slot: {}", decoded.slot);
-        println!("  Instructions: {}", decoded.instructions.len());
-        println!("  Events: {}", decoded.events.len());
+        println!("  Slot: {}", decoded_tx.slot);
+        println!("  Instructions: {}", decoded_tx.instructions.len());
+        println!("  Events: {}", decoded_tx.events.len());
 
-        if let Some(compute_units) = decoded.compute_units_consumed {
+        if let Some(compute_units) = decoded_tx.compute_units_consumed {
             println!("  Compute units: {compute_units}");
         }
 
         // Display instruction details
-        for instruction in &decoded.instructions {
+        for instruction in &decoded_tx.instructions {
             println!(
                 "    - Instruction {}: {} ({})",
                 instruction.index, instruction.instruction_type, instruction.program_id
@@ -240,10 +240,10 @@ impl Poller {
         }
 
         // Display event details
-        for event in &decoded.events {
+        for event in &decoded_tx.events {
             println!("    - Event: {:?}", event.event_type);
             if let Some(data) = &event.data {
-                println!("      Data: {}", data);
+                println!("      Data: {data}");
             }
         }
 

@@ -16,7 +16,7 @@ use crate::{
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 /// Main indexer that orchestrates the complete pipeline.
 ///
@@ -144,6 +144,10 @@ impl SolanaIndexer {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the decoder has multiple references.
     pub fn decoder_mut(&mut self) -> &mut Decoder {
         Arc::get_mut(&mut self.decoder).expect("Decoder has multiple references")
     }
@@ -194,11 +198,11 @@ impl SolanaIndexer {
             match self.poll_and_process(&mut last_signature).await {
                 Ok(processed) => {
                     if processed > 0 {
-                        println!("Processed {} new transactions", processed);
+                        println!("Processed {processed} new transactions");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error in indexing loop: {}", e);
+                    eprintln!("Error in indexing loop: {e}");
                     // Continue polling despite errors
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
@@ -208,7 +212,7 @@ impl SolanaIndexer {
 
     async fn poll_and_process(&self, last_signature: &mut Option<Signature>) -> Result<usize> {
         // Fetch new signatures
-        let signatures = self.fetch_signatures(last_signature).await?;
+        let signatures = self.fetch_signatures(last_signature.as_ref()).await?;
 
         if signatures.is_empty() {
             return Ok(0);
@@ -235,7 +239,7 @@ impl SolanaIndexer {
                     processed_count += 1;
                 }
                 Err(e) => {
-                    eprintln!("Error processing transaction {}: {}", sig_str, e);
+                    eprintln!("Error processing transaction {sig_str}: {e}");
                     // Continue with next transaction
                 }
             }
@@ -244,14 +248,14 @@ impl SolanaIndexer {
         Ok(processed_count)
     }
 
-    async fn fetch_signatures(&self, last_signature: &Option<Signature>) -> Result<Vec<Signature>> {
+    async fn fetch_signatures(&self, last_signature: Option<&Signature>) -> Result<Vec<Signature>> {
         use solana_client::rpc_client::RpcClient;
         use solana_sdk::commitment_config::CommitmentConfig;
 
         let rpc_url = self.config.rpc_url.clone();
         let program_id = self.config.program_id;
         let batch_size = self.config.batch_size;
-        let last_sig = *last_signature;
+        let last_sig = last_signature.copied();
 
         tokio::task::spawn_blocking(move || {
             let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());

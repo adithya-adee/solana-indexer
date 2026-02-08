@@ -23,7 +23,7 @@ use std::time::Duration;
 /// # }
 /// ```
 pub struct Storage {
-    /// PostgreSQL connection pool
+    /// `PostgreSQL` connection pool
     pool: PgPool,
 }
 
@@ -32,7 +32,7 @@ impl Storage {
     ///
     /// # Arguments
     ///
-    /// * `database_url` - PostgreSQL connection string
+    /// * `database_url` - `PostgreSQL` connection string
     ///
     /// # Errors
     ///
@@ -97,23 +97,23 @@ impl Storage {
     /// ```
     pub async fn initialize(&self) -> Result<()> {
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE IF NOT EXISTS _solana_indexer_processed (
                 signature TEXT PRIMARY KEY,
                 slot BIGINT NOT NULL,
-                processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                indexed_at TIMESTAMPTZ DEFAULT NOW()
             )
-            "#,
+            ",
         )
         .execute(&self.pool)
         .await?;
 
         // Create index for faster lookups
         sqlx::query(
-            r#"
+            r"
             CREATE INDEX IF NOT EXISTS idx_processed_slot 
             ON _solana_indexer_processed(slot)
-            "#,
+            ",
         )
         .execute(&self.pool)
         .await?;
@@ -185,7 +185,7 @@ impl Storage {
             "INSERT INTO _solana_indexer_processed (signature, slot) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         )
         .bind(signature)
-        .bind(slot as i64)
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
         .execute(&self.pool)
         .await?;
 
@@ -221,7 +221,7 @@ impl Storage {
                 .fetch_one(&self.pool)
                 .await?;
 
-        Ok(result.map(|s| s as u64))
+        Ok(result.map(|s| s.try_into().unwrap_or(0)))
     }
 
     /// Closes the database connection pool.
