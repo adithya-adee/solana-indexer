@@ -16,6 +16,7 @@ pub trait StorageBackend: Send + Sync {
     async fn is_processed(&self, signature: &str) -> Result<bool>;
     async fn mark_processed(&self, signature: &str, slot: u64) -> Result<()>;
     async fn get_last_processed_slot(&self) -> Result<Option<u64>>;
+    async fn get_last_processed_signature(&self) -> Result<Option<String>>;
     fn pool(&self) -> &PgPool;
 }
 
@@ -236,6 +237,26 @@ impl Storage {
         Ok(result.map(|s| s.try_into().unwrap_or(0)))
     }
 
+    /// Gets the signature of the last processed transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SolanaIndexerError::DatabaseError` if query fails.
+    ///
+    /// # Returns
+    ///
+    /// The signature of the transaction with the highest slot number, or `None`
+    /// if no transactions have been processed yet.
+    pub async fn get_last_processed_signature(&self) -> Result<Option<String>> {
+        let result = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT signature FROM _solana_indexer_processed ORDER BY slot DESC, indexed_at DESC LIMIT 1"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result)
+    }
+
     /// Closes the database connection pool.
     ///
     /// # Example
@@ -270,6 +291,10 @@ impl StorageBackend for Storage {
 
     async fn get_last_processed_slot(&self) -> Result<Option<u64>> {
         self.get_last_processed_slot().await
+    }
+
+    async fn get_last_processed_signature(&self) -> Result<Option<String>> {
+        self.get_last_processed_signature().await
     }
 
     fn pool(&self) -> &PgPool {

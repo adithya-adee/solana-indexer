@@ -5,6 +5,7 @@
 
 use crate::utils::error::{Result, SolanaIndexerError};
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 use std::str::FromStr;
 
 /// Configuration for `SolanaIndexer` indexer.
@@ -31,6 +32,9 @@ pub struct SolanaIndexerConfig {
 
     /// Indexing mode (Inputs, Logs, or All)
     pub indexing_mode: IndexingMode,
+
+    /// Strategy for determining where to start indexing from
+    pub start_strategy: StartStrategy,
 }
 
 impl SolanaIndexerConfig {
@@ -76,6 +80,18 @@ pub enum IndexingMode {
     All,
 }
 
+/// Strategy for determining where to start indexing from.
+#[derive(Debug, Clone, Default)]
+pub enum StartStrategy {
+    /// Fetch the most recent signature from RPC at startup (start from "now").
+    #[default]
+    Latest,
+    /// Start from a specific transaction signature (manual backfill).
+    Signature(Signature),
+    /// Resume from the last processed signature in the database (prevents gaps).
+    Resume,
+}
+
 /// Builder for `SolanaIndexerConfig`.
 ///
 /// This builder provides a fluent API for constructing `SolanaIndexerConfig` instances
@@ -106,6 +122,7 @@ pub struct SolanaIndexerConfigBuilder {
     batch_size: Option<usize>,
     source: Option<SourceConfig>,
     indexing_mode: Option<IndexingMode>,
+    start_strategy: Option<StartStrategy>,
 }
 
 impl SolanaIndexerConfigBuilder {
@@ -265,6 +282,50 @@ impl SolanaIndexerConfigBuilder {
         self
     }
 
+    /// Sets the starting signature for indexing (manual backfill).
+    ///
+    /// This sets the strategy to `StartStrategy::Signature`.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - The transaction signature to start from
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use solana_indexer::SolanaIndexerConfigBuilder;
+    /// let builder = SolanaIndexerConfigBuilder::new()
+    ///     .with_start_signature("5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7");
+    /// ```
+    #[must_use]
+    pub fn with_start_signature(mut self, signature: impl Into<String>) -> Self {
+        let sig_str = signature.into();
+        if let Ok(sig) = Signature::from_str(&sig_str) {
+            self.start_strategy = Some(StartStrategy::Signature(sig));
+        }
+        self
+    }
+
+    /// Sets the start strategy for the indexer.
+    ///
+    /// # Arguments
+    ///
+    /// * `strategy` - The resumption strategy to use
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use solana_indexer::SolanaIndexerConfigBuilder;
+    /// # use solana_indexer::config::StartStrategy;
+    /// let builder = SolanaIndexerConfigBuilder::new()
+    ///     .with_start_strategy(StartStrategy::Resume);
+    /// ```
+    #[must_use]
+    pub fn with_start_strategy(mut self, strategy: StartStrategy) -> Self {
+        self.start_strategy = Some(strategy);
+        self
+    }
+
     /// Builds and validates the configuration.
     ///
     /// # Errors
@@ -302,7 +363,7 @@ impl SolanaIndexerConfigBuilder {
         let poll_interval_secs = self.poll_interval_secs.unwrap_or(5);
         let batch_size = self.batch_size.unwrap_or(100);
 
-        // If source is not set, error out (or default? user said remove rpc_url, so we force setting it via with_rpc or with_ws)
+        // If source is not set, error out
         let source = self.source.ok_or_else(|| {
              SolanaIndexerError::ConfigError("Source configuration (RPC or WebSocket) is required. Use .with_rpc() or .with_ws()".to_string())
         })?;
@@ -314,6 +375,7 @@ impl SolanaIndexerConfigBuilder {
             batch_size,
             source,
             indexing_mode: self.indexing_mode.unwrap_or_default(),
+            start_strategy: self.start_strategy.unwrap_or_default(),
         })
     }
 }

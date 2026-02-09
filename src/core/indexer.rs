@@ -5,7 +5,7 @@
 
 use crate::config::SourceConfig;
 use crate::{
-    config::{IndexingMode, SolanaIndexerConfig},
+    config::{IndexingMode, SolanaIndexerConfig, StartStrategy},
     core::{
         decoder::Decoder, fetcher::Fetcher, log_registry::LogDecoderRegistry,
         registry::DecoderRegistry,
@@ -13,7 +13,10 @@ use crate::{
     storage::{Storage, StorageBackend},
     streams::{TransactionSource, websocket::WebSocketSource},
     types::traits::{HandlerRegistry, SchemaInitializer},
-    utils::{error::Result, logging},
+    utils::{
+        error::{Result, SolanaIndexerError},
+        logging,
+    },
 };
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
@@ -221,7 +224,48 @@ impl SolanaIndexer {
         logging::log(logging::LogLevel::Success, "Database schema initialized");
 
         let mut poll_interval = interval(Duration::from_secs(self.config.poll_interval_secs));
-        let mut last_signature: Option<Signature> = None;
+        let mut last_signature: Option<Signature> = match &self.config.start_strategy {
+            StartStrategy::Latest => {
+                logging::log(
+                    logging::LogLevel::Info,
+                    "Strategy: Latest (Fetching checkpoint from RPC)",
+                );
+                self.fetch_signatures(None).await?.first().copied()
+            }
+            StartStrategy::Signature(sig) => {
+                logging::log(
+                    logging::LogLevel::Info,
+                    &format!("Strategy: Signature (Starting from {sig})"),
+                );
+                Some(*sig)
+            }
+            StartStrategy::Resume => {
+                logging::log(
+                    logging::LogLevel::Info,
+                    "Strategy: Resume (Checking database)",
+                );
+                if let Some(sig_str) = self.storage.get_last_processed_signature().await? {
+                    let sig = Signature::from_str(&sig_str).map_err(|e| {
+                        SolanaIndexerError::InternalError(format!("Invalid signature in DB: {e}"))
+                    })?;
+                    logging::log(logging::LogLevel::Success, &format!("Resuming from: {sig}"));
+                    Some(sig)
+                } else {
+                    logging::log(
+                        logging::LogLevel::Warning,
+                        "No previous state found. Defaulting to Latest.",
+                    );
+                    self.fetch_signatures(None).await?.first().copied()
+                }
+            }
+        };
+
+        if let Some(sig) = last_signature {
+            logging::log(
+                logging::LogLevel::Info,
+                &format!("Indexer checkpoint: {sig}"),
+            );
+        }
 
         logging::log(logging::LogLevel::Info, "Starting indexer loop (RPC)...\n");
 
@@ -237,11 +281,23 @@ impl SolanaIndexer {
                         logging::log_batch(processed, processed, duration_ms);
                     }
                 }
-                Err(e) => {
-                    logging::log_error("Indexing error", &e.to_string());
-                    // Continue polling despite errors
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
+                Err(e) => match e {
+                    SolanaIndexerError::RpcError(ref msg) => {
+                        logging::log_error("RPC failure (Exiting)", msg);
+                        return Err(e);
+                    }
+                    SolanaIndexerError::DatabaseError(ref err) => {
+                        logging::log_error(
+                            "Database failure (Retrying next cycle)",
+                            &err.to_string(),
+                        );
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                    _ => {
+                        logging::log_error("Indexing error", &e.to_string());
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                },
             }
         }
     }
@@ -438,9 +494,33 @@ impl SolanaIndexer {
             let events = self.decoder_registry.decode_transaction(instructions);
 
             for (discriminator, event_data) in events {
-                self.handler_registry
-                    .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
-                    .await?;
+                // Retry handler 3 times
+                let mut attempts = 0;
+                let max_attempts = 3;
+                loop {
+                    attempts += 1;
+                    match self
+                        .handler_registry
+                        .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
+                        .await
+                    {
+                        Ok(()) => break,
+                        Err(e) if attempts < max_attempts => {
+                            logging::log_error(
+                                "Handler error",
+                                &format!("Attempt {attempts}/{max_attempts} for {sig_str}: {e}"),
+                            );
+                            tokio::time::sleep(Duration::from_millis(100 * attempts)).await;
+                        }
+                        Err(e) => {
+                            logging::log_error(
+                                "Handler failed after retries",
+                                &format!("{sig_str}: {e}"),
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
                 events_processed += 1;
             }
         }
@@ -452,9 +532,33 @@ impl SolanaIndexer {
             let events = self.log_decoder_registry.decode_logs(&decoded_meta.events);
 
             for (discriminator, event_data) in events {
-                self.handler_registry
-                    .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
-                    .await?;
+                // Retry handler 3 times
+                let mut attempts = 0;
+                let max_attempts = 3;
+                loop {
+                    attempts += 1;
+                    match self
+                        .handler_registry
+                        .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
+                        .await
+                    {
+                        Ok(()) => break,
+                        Err(e) if attempts < max_attempts => {
+                            logging::log_error(
+                                "Handler error",
+                                &format!("Attempt {attempts}/{max_attempts} for {sig_str}: {e}"),
+                            );
+                            tokio::time::sleep(Duration::from_millis(100 * attempts)).await;
+                        }
+                        Err(e) => {
+                            logging::log_error(
+                                "Handler failed after retries",
+                                &format!("{sig_str}: {e}"),
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
                 events_processed += 1;
             }
         }

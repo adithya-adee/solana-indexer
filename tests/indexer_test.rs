@@ -48,6 +48,11 @@ impl StorageBackend for MockStorage {
         Ok(None)
     }
 
+    async fn get_last_processed_signature(&self) -> Result<Option<String>> {
+        let sigs = self.processed_signatures.lock().unwrap();
+        Ok(sigs.last().cloned())
+    }
+
     fn pool(&self) -> &PgPool {
         &self.pool
     }

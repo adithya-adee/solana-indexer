@@ -67,9 +67,13 @@ impl Poller {
     /// ```
     #[must_use]
     pub fn new(config: SolanaIndexerConfig) -> Self {
+        let last_signature = match config.start_strategy {
+            crate::config::StartStrategy::Signature(sig) => Some(sig),
+            _ => None, // Will be initialized by the indexer
+        };
         Self {
             config,
-            last_signature: None,
+            last_signature,
         }
     }
 
@@ -189,9 +193,12 @@ impl Poller {
                     }
                 }
                 Err(e) => {
-                    // Log error but continue polling
+                    if let SolanaIndexerError::RpcError(ref msg) = e {
+                        eprintln!("RPC failure in poller (Exiting): {msg}");
+                        return Err(e);
+                    }
                     eprintln!("Error fetching signatures: {e}");
-                    // TODO: Implement retry logic with exponential backoff
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
         }
@@ -270,6 +277,7 @@ mod tests {
                 batch_size: 100,
             },
             indexing_mode: crate::config::IndexingMode::Inputs,
+            start_strategy: crate::config::StartStrategy::Latest,
         };
 
         let poller = Poller::new(config);
