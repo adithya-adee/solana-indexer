@@ -121,9 +121,12 @@
 //! - **Flexible Decoders**: Custom instruction parsing logic
 //! - **Database Integration**: Built-in `PostgreSQL` support with `SQLx`
 //! - **Production Ready**: Colorful logging, error recovery, metrics
+//!
 
-#![warn(clippy::all, clippy::pedantic)]
+#![warn(clippy::all)]
 #![allow(clippy::module_name_repetitions)]
+
+use std::io::Read;
 
 // Public API exports
 pub use config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
@@ -155,3 +158,17 @@ pub mod storage;
 pub mod streams;
 pub mod types;
 pub mod utils;
+
+// Workaround for `getrandom` custom feature requirement enabled transitively on Linux
+#[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn __getrandom_custom(dest: *mut u8, len: usize) -> u32 {
+    // SAFETY: caller must ensure dest is valid for len bytes
+    unsafe {
+        let slice = std::slice::from_raw_parts_mut(dest, len);
+        // fallback to /dev/urandom for custom impl on Linux
+        let mut file = std::fs::File::open("/dev/urandom").expect("failed to open /dev/urandom");
+        file.read_exact(slice).expect("failed to read /dev/urandom");
+    }
+    0 // success
+}

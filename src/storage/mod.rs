@@ -314,9 +314,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires database connection"] // Requires database connection
+    // #[ignore = "Requires database connection"] // Requires database connection
     async fn test_storage_initialize() {
-        let db_url = std::env::var("TEST_DATABASE_URL")
+        let db_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://localhost/test".to_string());
 
         if let Ok(storage) = Storage::new(&db_url).await {
@@ -326,9 +326,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires database connection"] // Requires database connection
+    // #[ignore = "Requires database connection"] // Requires database connection
     async fn test_idempotency_tracking() {
-        let db_url = std::env::var("TEST_DATABASE_URL")
+        let db_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://localhost/test".to_string());
 
         if let Ok(storage) = Storage::new(&db_url).await {
