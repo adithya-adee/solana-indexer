@@ -276,7 +276,7 @@ mod tests {
                 poll_interval_secs: 5,
                 batch_size: 100,
             },
-            indexing_mode: crate::config::IndexingMode::Inputs,
+            indexing_mode: crate::config::IndexingMode::inputs(),
             start_strategy: crate::config::StartStrategy::Latest,
         };
 

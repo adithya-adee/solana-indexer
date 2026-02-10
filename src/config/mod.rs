@@ -4,6 +4,7 @@
 //! allowing developers to configure `SolanaIndexer` with type safety and discoverability.
 
 use crate::utils::error::{Result, SolanaIndexerError};
+use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
@@ -117,15 +118,65 @@ pub enum HeliusNetwork {
 }
 
 /// Mode of indexing operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum IndexingMode {
-    /// Index based on instruction data (default).
-    #[default]
-    Inputs,
+///
+/// Configures which types of data the indexer should process.
+/// Supports multi-selection of options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexingMode {
+    /// Index based on instruction data (Inputs).
+    pub inputs: bool,
     /// Index based on event logs.
-    Logs,
-    /// Index both inputs and logs.
-    All,
+    pub logs: bool,
+    /// Index accounts.
+    pub accounts: bool,
+}
+
+impl Default for IndexingMode {
+    fn default() -> Self {
+        Self {
+            inputs: true,
+            logs: false,
+            accounts: false,
+        }
+    }
+}
+
+impl IndexingMode {
+    /// Create a mode computing Inputs only.
+    pub fn inputs() -> Self {
+        Self {
+            inputs: true,
+            logs: false,
+            accounts: false,
+        }
+    }
+
+    /// Create a mode computing Logs only.
+    pub fn logs() -> Self {
+        Self {
+            inputs: false,
+            logs: true,
+            accounts: false,
+        }
+    }
+
+    /// Create a mode computing Accounts only.
+    pub fn accounts() -> Self {
+        Self {
+            inputs: false,
+            logs: false,
+            accounts: true,
+        }
+    }
+
+    /// Create a mode computing All (Inputs + Logs + Accounts).
+    pub fn all() -> Self {
+        Self {
+            inputs: true,
+            logs: true,
+            accounts: true,
+        }
+    }
 }
 
 /// Strategy for determining where to start indexing from.
@@ -411,6 +462,17 @@ impl SolanaIndexerConfigBuilder {
     #[must_use]
     pub fn with_start_strategy(mut self, strategy: StartStrategy) -> Self {
         self.start_strategy = Some(strategy);
+        self
+    }
+
+    /// Sets the indexing mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The indexing mode configuration
+    #[must_use]
+    pub fn with_indexing_mode(mut self, mode: IndexingMode) -> Self {
+        self.indexing_mode = Some(mode);
         self
     }
 

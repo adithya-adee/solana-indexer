@@ -1,17 +1,15 @@
-//! Example of an indexer tracking Solana accounts.
+//! Example of an indexer tracking Solana accounts via transaction processing.
 //!
-//! This example demonstrates how to configure and run the Solana Indexer to
-//! fetch and decode specific account types.
+//! This example shows how to configure the indexer to process accounts involved in transactions.
 
 use async_trait::async_trait;
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_indexer::{
     AccountDecoder, EventDiscriminator, Result, SchemaInitializer, SolanaIndexer,
-    SolanaIndexerConfigBuilder,
+    SolanaIndexerConfigBuilder, config::IndexingMode, types::traits::EventHandler,
 };
-use solana_sdk::{account::Account, pubkey::Pubkey};
+use solana_sdk::account::Account;
 use sqlx::PgPool;
-use std::str::FromStr;
 
 // 1. Define your Account structure
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
@@ -24,8 +22,7 @@ pub struct UserProfile {
 // 2. Implement EventDiscriminator
 impl EventDiscriminator for UserProfile {
     fn discriminator() -> [u8; 8] {
-        // In Anchor, this is usually sha256("account:UserProfile")[..8]
-        // For this example, we use a dummy value
+        // Example discriminator (e.g., sha256("account:UserProfile")[..8])
         [101, 202, 103, 204, 105, 206, 107, 208]
     }
 }
@@ -36,7 +33,6 @@ pub struct UserProfileDecoder;
 impl AccountDecoder<UserProfile> for UserProfileDecoder {
     fn decode(&self, account: &Account) -> Option<UserProfile> {
         // Typically check owner matches program_id first
-        // Check data length
         if account.data.len() < 8 {
             return None;
         }
@@ -51,15 +47,38 @@ impl AccountDecoder<UserProfile> for UserProfileDecoder {
     }
 }
 
-// 4. Implement SchemaInitializer
+// 4. Implement EventHandler
+pub struct UserProfileHandler;
+
+#[async_trait]
+impl EventHandler<UserProfile> for UserProfileHandler {
+    async fn handle(&self, event: UserProfile, db: &PgPool, signature: &str) -> Result<()> {
+        println!(
+            "✅ Found UserProfile in tx {}: {} (Rep: {})",
+            signature, event.username, event.reputation
+        );
+
+        // Store in Database
+        sqlx::query("INSERT INTO users (username, reputation, last_signature) VALUES ($1, $2, $3) ON CONFLICT (username) DO UPDATE SET reputation = $2, last_signature = $3")
+            .bind(&event.username)
+            .bind(event.reputation as i64)
+            .bind(signature)
+            .execute(db)
+            .await
+            .map_err(solana_indexer::utils::error::SolanaIndexerError::DatabaseError)?;
+
+        Ok(())
+    }
+}
+
+// 5. Implement SchemaInitializer
 pub struct UserSchemaInitializer;
 
 #[async_trait]
 impl SchemaInitializer for UserSchemaInitializer {
     async fn initialize(&self, db: &PgPool) -> Result<()> {
-        println!("🛠️  Initializing User Schema (Creating 'users' table if not exists)...");
-        // Example SQL:
-        sqlx::query("CREATE TABLE IF NOT EXISTS users (pubkey TEXT PRIMARY KEY, username TEXT, reputation BIGINT)")
+        println!("🛠️  Initializing User Schema...");
+        sqlx::query("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, reputation BIGINT, last_signature TEXT)")
            .execute(db).await?;
         println!("✅ User Schema Initialized");
         Ok(())
@@ -74,116 +93,39 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let rpc_url = std::env::var("RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_string());
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://user:pass@localhost/db".to_string());
+    // Use System Program or your specific program ID
+    let program_id_str = std::env::var("PROGRAM_ID")
+        .unwrap_or_else(|_| "11111111111111111111111111111111".to_string());
 
-    println!("🚀 Starting Account Indexer Example");
+    println!("🚀 Starting Account Indexer (Live Mode)");
 
     // Configure Indexer
     let config = SolanaIndexerConfigBuilder::new()
         .with_rpc(rpc_url)
         .with_database(db_url)
-        .program_id(
-            std::env::var("PROGRAM_ID")
-                .unwrap_or_else(|_| "11111111111111111111111111111111".to_string()),
-        ) // Dummy Program ID
+        .program_id(program_id_str)
+        .with_indexing_mode(IndexingMode::accounts()) // Enable Account Indexing
         .build()?;
 
     let mut indexer = SolanaIndexer::new(config).await?;
 
-    // Register our Schema Initializer
-    let initializer = UserSchemaInitializer;
+    // Register Components
     indexer.register_schema_initializer(Box::new(UserSchemaInitializer));
 
-    // Manually run initialization since we are not calling start()
-    initializer.initialize(indexer.storage().pool()).await?;
-
-    // Register our Account Decoder
     indexer.account_decoder_registry_mut().register(Box::new(
         Box::new(UserProfileDecoder) as Box<dyn AccountDecoder<UserProfile>>
     ));
 
-    println!("✅ Registered UserProfile Decoder");
+    indexer.handler_registry_mut().register(
+        UserProfile::discriminator(),
+        Box::new(Box::new(UserProfileHandler) as Box<dyn EventHandler<UserProfile>>),
+    );
 
-    // Run Account Indexing
-    run_account_indexing(&indexer).await?;
+    println!("✅ Registered Decoder, Handler, and Schema");
+    println!("🔄 Starting Indexer Loop...");
 
-    Ok(())
-}
+    // Run the standard indexer loop
+    indexer.start().await?;
 
-async fn run_account_indexing(
-    indexer: &SolanaIndexer,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    println!("🔄 Starting Account Indexing Loop...");
-
-    // In a real app, you would use the actual program ID you are indexing
-    let program_id = Pubkey::from_str("11111111111111111111111111111111")?;
-
-    // 1. Fetch all accounts for the program
-    // We treat fetch failure as Ok(()) for the example to not crash if RPC is down/mocked
-    let mut accounts = match indexer.fetcher().get_program_accounts(&program_id).await {
-        Ok(accs) => accs,
-        Err(e) => {
-            eprintln!(
-                "⚠️  Failed to fetch program accounts (RPC might be unreachable): {}",
-                e
-            );
-            vec![]
-        }
-    };
-
-    // 2. Inject Mock Data for Demonstration
-    // Since we don't have a real program deployed on mainnet for this example custom struct,
-    // we manually inject an account that has the correct data structure to prove the decoder works.
-    println!("ℹ️  Injecting mock account for demonstration...");
-
-    let mock_user = UserProfile {
-        discriminator: UserProfile::discriminator(),
-        username: "solana_dev".to_string(),
-        reputation: 9001,
-    };
-    let mock_data = borsh::to_vec(&mock_user)?;
-
-    let mock_account = Account {
-        lamports: 1_000_000,
-        data: mock_data,
-        owner: program_id,
-        executable: false,
-        rent_epoch: 0,
-    };
-    let mock_pubkey = Pubkey::new_unique();
-
-    accounts.push((mock_pubkey, mock_account));
-
-    println!("📊 Processing {} accounts...", accounts.len());
-
-    let pool = indexer.storage().pool();
-
-    // 3. Iterate and Decode
-    for (pubkey, account) in accounts {
-        let decoded_results = indexer.account_decoder_registry().decode_account(&account);
-
-        for (_discriminator, data) in decoded_results {
-            // 4. Deserialize into typed struct
-            if let Ok(user_profile) = UserProfile::try_from_slice(&data) {
-                println!(
-                    "✅ Found UserProfile: {} (Rep: {})",
-                    user_profile.username, user_profile.reputation
-                );
-
-                // 5. Store in Database
-                // This assumes a 'users' table exists.
-
-                // Example SQL (commented out as table doesn't exist in generic setup)
-                sqlx::query("INSERT INTO users (pubkey, username, reputation) VALUES ($1, $2, $3) ON CONFLICT (pubkey) DO UPDATE SET reputation = $3")
-                    .bind(pubkey.to_string())
-                    .bind(&user_profile.username)
-                    .bind(user_profile.reputation as i64)
-                    .execute(pool)
-                    .await?;
-                println!("   -> Stored account {}", pubkey);
-            }
-        }
-    }
-
-    println!("✅ Account indexing complete.");
     Ok(())
 }

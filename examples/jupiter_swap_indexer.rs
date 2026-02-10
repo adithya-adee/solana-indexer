@@ -176,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Switch to LOG indexing mode
     let mut config = config;
-    config.indexing_mode = IndexingMode::Logs;
+    config.indexing_mode = IndexingMode::logs();
 
     // Initialize indexer
     let mut indexer = solana_indexer::SolanaIndexer::new(config).await?;
