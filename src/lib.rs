@@ -130,6 +130,7 @@ use std::io::Read;
 
 // Public API exports
 pub use config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
+pub use core::account_registry::AccountDecoderRegistry;
 pub use core::decoder::{DecodedTransaction, Decoder, InstructionInfo};
 pub use core::fetcher::Fetcher;
 pub use core::indexer::SolanaIndexer;
@@ -142,8 +143,8 @@ pub use types::events::{
     calculate_discriminator,
 };
 pub use types::traits::{
-    DynamicEventHandler, DynamicInstructionDecoder, EventHandler, HandlerRegistry,
-    InstructionDecoder, SchemaInitializer,
+    AccountDecoder, DynamicAccountDecoder, DynamicEventHandler, DynamicInstructionDecoder,
+    EventHandler, HandlerRegistry, InstructionDecoder, LogDecoder, SchemaInitializer,
 };
 pub use utils::error::{Result, SolanaIndexerError};
 pub use utils::macros::{

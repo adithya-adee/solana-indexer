@@ -228,6 +228,86 @@ impl Fetcher {
         .await
         .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
     }
+
+    /// Fetches a single account by its public key.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the account to fetch
+    ///
+    /// # Returns
+    ///
+    /// The account data if found.
+    pub async fn fetch_account(
+        &self,
+        pubkey: &solana_sdk::pubkey::Pubkey,
+    ) -> Result<solana_sdk::account::Account> {
+        let rpc_url = self.rpc_url.clone();
+        let key = *pubkey;
+
+        tokio::task::spawn_blocking(move || {
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            rpc_client.get_account(&key).map_err(|e| {
+                SolanaIndexerError::RpcError(format!("Failed to fetch account {key}: {e}"))
+            })
+        })
+        .await
+        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+    }
+
+    /// Fetches multiple accounts by their public keys.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkeys` - A slice of public keys to fetch
+    ///
+    /// # Returns
+    ///
+    /// A vector of optional accounts. `None` indicates the account does not exist.
+    pub async fn fetch_multiple_accounts(
+        &self,
+        pubkeys: &[solana_sdk::pubkey::Pubkey],
+    ) -> Result<Vec<Option<solana_sdk::account::Account>>> {
+        let rpc_url = self.rpc_url.clone();
+        let keys = pubkeys.to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            rpc_client.get_multiple_accounts(&keys).map_err(|e| {
+                SolanaIndexerError::RpcError(format!("Failed to fetch multiple accounts: {e}"))
+            })
+        })
+        .await
+        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+    }
+
+    /// Fetches all accounts owned by a program.
+    ///
+    /// # Arguments
+    ///
+    /// * `program_id` - The program ID to fetch accounts for
+    ///
+    /// # Returns
+    ///
+    /// A vector of (Pubkey, Account) tuples.
+    pub async fn get_program_accounts(
+        &self,
+        program_id: &solana_sdk::pubkey::Pubkey,
+    ) -> Result<Vec<(solana_sdk::pubkey::Pubkey, solana_sdk::account::Account)>> {
+        let rpc_url = self.rpc_url.clone();
+        let pid = *program_id;
+
+        tokio::task::spawn_blocking(move || {
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            rpc_client.get_program_accounts(&pid).map_err(|e| {
+                SolanaIndexerError::RpcError(format!(
+                    "Failed to get program accounts for {pid}: {e}"
+                ))
+            })
+        })
+        .await
+        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+    }
 }
 
 #[cfg(test)]

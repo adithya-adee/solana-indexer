@@ -7,8 +7,8 @@ use crate::config::SourceConfig;
 use crate::{
     config::{IndexingMode, SolanaIndexerConfig, StartStrategy},
     core::{
-        decoder::Decoder, fetcher::Fetcher, log_registry::LogDecoderRegistry,
-        registry::DecoderRegistry,
+        account_registry::AccountDecoderRegistry, decoder::Decoder, fetcher::Fetcher,
+        log_registry::LogDecoderRegistry, registry::DecoderRegistry,
     },
     storage::{Storage, StorageBackend},
     streams::{TransactionSource, helius::HeliusSource, websocket::WebSocketSource},
@@ -53,6 +53,7 @@ pub struct SolanaIndexer {
     decoder: Arc<Decoder>,
     decoder_registry: Arc<DecoderRegistry>,
     log_decoder_registry: Arc<LogDecoderRegistry>,
+    account_decoder_registry: Arc<AccountDecoderRegistry>,
     handler_registry: Arc<HandlerRegistry>,
     schema_initializers: Vec<Box<dyn SchemaInitializer>>,
 }
@@ -91,6 +92,7 @@ impl SolanaIndexer {
         let decoder = Arc::new(Decoder::new());
         let decoder_registry = Arc::new(DecoderRegistry::new());
         let log_decoder_registry = Arc::new(LogDecoderRegistry::new());
+        let account_decoder_registry = Arc::new(AccountDecoderRegistry::new());
         let handler_registry = Arc::new(HandlerRegistry::new());
 
         Ok(Self {
@@ -100,6 +102,7 @@ impl SolanaIndexer {
             decoder,
             decoder_registry,
             log_decoder_registry,
+            account_decoder_registry,
             handler_registry,
             schema_initializers: Vec::new(),
         })
@@ -113,6 +116,7 @@ impl SolanaIndexer {
         let decoder = Arc::new(Decoder::new());
         let decoder_registry = Arc::new(DecoderRegistry::new());
         let log_decoder_registry = Arc::new(LogDecoderRegistry::new());
+        let account_decoder_registry = Arc::new(AccountDecoderRegistry::new());
         let handler_registry = Arc::new(HandlerRegistry::new());
 
         Self {
@@ -122,6 +126,7 @@ impl SolanaIndexer {
             decoder,
             decoder_registry,
             log_decoder_registry,
+            account_decoder_registry,
             handler_registry,
             schema_initializers: Vec::new(),
         }
@@ -175,6 +180,22 @@ impl SolanaIndexer {
             .expect("LogDecoderRegistry has multiple references")
     }
 
+    /// Returns a reference to the account decoder registry.
+    #[must_use]
+    pub fn account_decoder_registry(&self) -> &AccountDecoderRegistry {
+        &self.account_decoder_registry
+    }
+
+    /// Returns a mutable reference to the account decoder registry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the account decoder registry has multiple references.
+    pub fn account_decoder_registry_mut(&mut self) -> &mut AccountDecoderRegistry {
+        Arc::get_mut(&mut self.account_decoder_registry)
+            .expect("AccountDecoderRegistry has multiple references")
+    }
+
     /// Registers a schema initializer.
     pub fn register_schema_initializer(&mut self, initializer: Box<dyn SchemaInitializer>) {
         self.schema_initializers.push(initializer);
@@ -187,6 +208,18 @@ impl SolanaIndexer {
     /// Panics if the decoder has multiple references.
     pub fn decoder_mut(&mut self) -> &mut Decoder {
         Arc::get_mut(&mut self.decoder).expect("Decoder has multiple references")
+    }
+
+    /// Returns a reference to the fetcher.
+    #[must_use]
+    pub fn fetcher(&self) -> &Fetcher {
+        &self.fetcher
+    }
+
+    /// Returns a reference to the storage backend.
+    #[must_use]
+    pub fn storage(&self) -> &dyn StorageBackend {
+        &*self.storage
     }
 
     /// Starts the indexer.

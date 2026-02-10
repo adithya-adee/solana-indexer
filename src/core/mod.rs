@@ -1,3 +1,4 @@
+pub mod account_registry;
 pub mod decoder;
 pub mod fetcher;
 pub mod indexer;

@@ -105,6 +105,47 @@ where
     }
 }
 
+/// Generic account decoder trait for custom parsing logic.
+///
+/// Developers implement this trait to define how Solana accounts
+/// are parsed into typed structures.
+pub trait AccountDecoder<T>: Send + Sync {
+    /// Decodes a Solana account into a typed structure.
+    ///
+    /// # Arguments
+    /// * `account` - The raw account data
+    ///
+    /// # Returns
+    /// * `Some(T)` - Successfully decoded type
+    /// * `None` - Data doesn't match or failed to decode
+    fn decode(&self, account: &solana_sdk::account::Account) -> Option<T>;
+}
+
+/// Type-erased account decoder for internal SDK use.
+pub trait DynamicAccountDecoder: Send + Sync {
+    /// Decodes an account into discriminator + raw data.
+    fn decode_account_dynamic(
+        &self,
+        account: &solana_sdk::account::Account,
+    ) -> Option<([u8; 8], Vec<u8>)>;
+}
+
+impl<T> DynamicAccountDecoder for Box<dyn AccountDecoder<T>>
+where
+    T: EventDiscriminator + BorshSerialize + Send + Sync + 'static,
+{
+    fn decode_account_dynamic(
+        &self,
+        account: &solana_sdk::account::Account,
+    ) -> Option<([u8; 8], Vec<u8>)> {
+        self.decode(account).map(|event| {
+            let discriminator = T::discriminator();
+            let data = borsh::to_vec(&event).expect("Failed to serialize event");
+            (discriminator, data)
+        })
+    }
+}
+
 /// Trait for initializing custom database schemas.
 ///
 /// Implement this trait to define custom table creation logic that runs
