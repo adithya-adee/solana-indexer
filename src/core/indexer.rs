@@ -11,7 +11,7 @@ use crate::{
         registry::DecoderRegistry,
     },
     storage::{Storage, StorageBackend},
-    streams::{TransactionSource, websocket::WebSocketSource},
+    streams::{TransactionSource, helius::HeliusSource, websocket::WebSocketSource},
     types::traits::{HandlerRegistry, SchemaInitializer},
     utils::{
         error::{Result, SolanaIndexerError},
@@ -203,7 +203,13 @@ impl SolanaIndexer {
         match &self.config.source {
             SourceConfig::Rpc { .. } => self.process_rpc_source().await,
             SourceConfig::WebSocket { .. } => self.process_websocket_source().await,
-            SourceConfig::Helius { .. } => self.process_helius_source().await,
+            SourceConfig::Helius { use_websocket, .. } => {
+                if *use_websocket {
+                    self.process_helius_source().await
+                } else {
+                    self.process_rpc_source().await
+                }
+            }
         }
     }
 
@@ -378,12 +384,105 @@ impl SolanaIndexer {
         }
     }
 
-    #[allow(clippy::unused_async)]
     async fn process_helius_source(self) -> Result<()> {
-        logging::log_error("Helius source", "Not implemented yet");
-        Err(crate::utils::error::SolanaIndexerError::ConfigError(
-            "Helius source not implemented".to_string(),
-        ))
+        logging::log_startup(
+            &self.config.program_id.to_string(),
+            self.config.rpc_url(),
+            0, // Real-time
+        );
+
+        // Run schema initializers
+        for initializer in &self.schema_initializers {
+            logging::log(logging::LogLevel::Info, "Initializing database schema...");
+            initializer.initialize(self.storage.pool()).await?;
+        }
+        logging::log(logging::LogLevel::Success, "Database schema initialized");
+
+        // Instantiate HeliusSource on demand from configuration
+        let mut source = HeliusSource::new(self.config.clone()).await?;
+
+        logging::log(
+            logging::LogLevel::Info,
+            "Starting indexer loop (Helius WebSocket)...",
+        );
+
+        // Semaphore to limit concurrent transaction processing
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(100)); // Limit to 100 concurrent tasks
+
+        loop {
+            match source.next_batch().await {
+                Ok(signatures) => {
+                    let mut processed_count = 0;
+
+                    for signature in signatures {
+                        let sig_str = signature.to_string();
+
+                        // Check if already processed (idempotency)
+                        if self.storage.is_processed(&sig_str).await? {
+                            continue;
+                        }
+
+                        // Acquire permit
+                        let permit = semaphore.clone().acquire_owned().await.map_err(|e| {
+                            SolanaIndexerError::InternalError(format!("Semaphore error: {e}"))
+                        })?;
+
+                        // Clone Arcs for the task
+                        let fetcher = self.fetcher.clone();
+                        let decoder = self.decoder.clone();
+                        let decoder_registry = self.decoder_registry.clone();
+                        let log_decoder_registry = self.log_decoder_registry.clone();
+                        let handler_registry = self.handler_registry.clone();
+                        let storage = self.storage.clone();
+                        let config = self.config.clone();
+
+                        // Spawn task
+                        tokio::spawn(async move {
+                            match Self::process_transaction_core(
+                                signature,
+                                fetcher,
+                                decoder,
+                                decoder_registry,
+                                log_decoder_registry,
+                                handler_registry,
+                                storage,
+                                config,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    // Success
+                                }
+                                Err(e) => {
+                                    logging::log_error(
+                                        "Transaction error",
+                                        &format!("{}: {}", signature, e),
+                                    );
+                                }
+                            }
+                            // Permit is dropped here, allowing next task
+                            drop(permit);
+                        });
+
+                        processed_count += 1;
+                    }
+
+                    if processed_count > 0 {
+                        // For logging batch stats, we log 'dispatched' count since processing is async
+                        logging::log(
+                            logging::LogLevel::Info,
+                            &format!("Dispatched {} transactions", processed_count),
+                        );
+                    }
+                }
+                Err(e) => {
+                    logging::log_error("Helius stream error", &e.to_string());
+                    // HeliusSource already handles reconnection internally, but if it returns error here,
+                    // valid to wait a bit
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
+        }
     }
 
     async fn poll_and_process(&self, last_signature: &mut Option<Signature>) -> Result<usize> {
@@ -461,13 +560,38 @@ impl SolanaIndexer {
     }
 
     async fn process_transaction(&self, signature: &Signature) -> Result<()> {
+        Self::process_transaction_core(
+            *signature,
+            self.fetcher.clone(),
+            self.decoder.clone(),
+            self.decoder_registry.clone(),
+            self.log_decoder_registry.clone(),
+            self.handler_registry.clone(),
+            self.storage.clone(),
+            self.config.clone(),
+        )
+        .await
+    }
+
+    /// Static implementation of transaction processing to allow concurrent execution.
+    #[allow(clippy::too_many_arguments)]
+    async fn process_transaction_core(
+        signature: Signature,
+        fetcher: Arc<Fetcher>,
+        decoder: Arc<Decoder>,
+        decoder_registry: Arc<DecoderRegistry>,
+        log_decoder_registry: Arc<LogDecoderRegistry>,
+        handler_registry: Arc<HandlerRegistry>,
+        storage: Arc<dyn StorageBackend>,
+        config: SolanaIndexerConfig,
+    ) -> Result<()> {
         let sig_str = signature.to_string();
 
         // Fetch transaction
-        let transaction = self.fetcher.fetch_transaction(signature).await?;
+        let transaction = fetcher.fetch_transaction(&signature).await?;
 
         // Decode transaction metadata (slot, etc.)
-        let decoded_meta = self.decoder.decode_transaction(&transaction)?;
+        let decoded_meta = decoder.decode_transaction(&transaction)?;
 
         // Extract UI instructions from the transaction
         let instructions = match &transaction.transaction.transaction {
@@ -488,10 +612,10 @@ impl SolanaIndexer {
 
         // Process based on indexing mode
         if matches!(
-            self.config.indexing_mode,
+            config.indexing_mode,
             IndexingMode::Inputs | IndexingMode::All
         ) {
-            let events = self.decoder_registry.decode_transaction(instructions);
+            let events = decoder_registry.decode_transaction(instructions);
 
             for (discriminator, event_data) in events {
                 // Retry handler 3 times
@@ -499,9 +623,8 @@ impl SolanaIndexer {
                 let max_attempts = 3;
                 loop {
                     attempts += 1;
-                    match self
-                        .handler_registry
-                        .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
+                    match handler_registry
+                        .handle(&discriminator, &event_data, storage.pool(), &sig_str)
                         .await
                     {
                         Ok(()) => break,
@@ -525,11 +648,8 @@ impl SolanaIndexer {
             }
         }
 
-        if matches!(
-            self.config.indexing_mode,
-            IndexingMode::Logs | IndexingMode::All
-        ) {
-            let events = self.log_decoder_registry.decode_logs(&decoded_meta.events);
+        if matches!(config.indexing_mode, IndexingMode::Logs | IndexingMode::All) {
+            let events = log_decoder_registry.decode_logs(&decoded_meta.events);
 
             for (discriminator, event_data) in events {
                 // Retry handler 3 times
@@ -537,9 +657,8 @@ impl SolanaIndexer {
                 let max_attempts = 3;
                 loop {
                     attempts += 1;
-                    match self
-                        .handler_registry
-                        .handle(&discriminator, &event_data, self.storage.pool(), &sig_str)
+                    match handler_registry
+                        .handle(&discriminator, &event_data, storage.pool(), &sig_str)
                         .await
                     {
                         Ok(()) => break,
@@ -564,9 +683,7 @@ impl SolanaIndexer {
         }
 
         // Mark as processed
-        self.storage
-            .mark_processed(&sig_str, transaction.slot)
-            .await?;
+        storage.mark_processed(&sig_str, transaction.slot).await?;
 
         // Log processing with colorful output
         if events_processed > 0 {

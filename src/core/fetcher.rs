@@ -103,23 +103,52 @@ impl Fetcher {
         let rpc_url = self.rpc_url.clone();
         let sig = *signature;
 
-        tokio::task::spawn_blocking(move || {
-            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+        let max_retries = 5;
+        let mut attempt = 0;
 
-            let config = RpcTransactionConfig {
-                encoding: Some(UiTransactionEncoding::JsonParsed),
-                commitment: Some(CommitmentConfig::confirmed()),
-                max_supported_transaction_version: Some(0),
-            };
+        loop {
+            attempt += 1;
 
-            rpc_client
-                .get_transaction_with_config(&sig, config)
-                .map_err(|e| {
-                    SolanaIndexerError::RpcError(format!("Failed to fetch transaction {sig}: {e}"))
-                })
-        })
-        .await
-        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+            // We use a new client per attempt or reuse one?
+            // In spawned blocking task we can't easily reuse across awaits unless we move it in/out.
+            // Spawning a new task for each attempt is simpler for error handling but maybe slightly more overhead.
+            // Let's keep the spawn_blocking wrapping the RPC call.
+
+            let rpc_url_clone = rpc_url.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let rpc_client =
+                    RpcClient::new_with_commitment(rpc_url_clone, CommitmentConfig::confirmed());
+
+                let config = RpcTransactionConfig {
+                    encoding: Some(UiTransactionEncoding::JsonParsed),
+                    commitment: Some(CommitmentConfig::confirmed()),
+                    max_supported_transaction_version: Some(0),
+                };
+
+                rpc_client.get_transaction_with_config(&sig, config)
+            })
+            .await
+            .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?;
+
+            match result {
+                Ok(tx) => return Ok(tx),
+                Err(e) => {
+                    if attempt >= max_retries {
+                        return Err(SolanaIndexerError::RpcError(format!(
+                            "Failed to fetch transaction {sig} after {max_retries} attempts: {e}"
+                        )));
+                    }
+
+                    // Simple backoff: 100ms * 2^attempt
+                    let backoff = std::time::Duration::from_millis(100 * (1 << attempt));
+                    eprintln!(
+                        "⚠️ Fetch failed for {sig} (Attempt {attempt}/{max_retries}): {e}. Retrying in {:?}...",
+                        backoff
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 
     /// Fetches multiple transactions in batch.

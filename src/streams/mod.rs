@@ -30,5 +30,6 @@ pub trait TransactionSource: Send + Sync {
     fn source_name(&self) -> &str;
 }
 
+pub mod helius;
 pub mod poller;
 pub mod websocket;
