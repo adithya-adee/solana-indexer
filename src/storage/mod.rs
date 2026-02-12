@@ -18,6 +18,18 @@ pub trait StorageBackend: Send + Sync {
     async fn get_last_processed_slot(&self) -> Result<Option<u64>>;
     async fn get_last_processed_signature(&self) -> Result<Option<String>>;
     fn pool(&self) -> &PgPool;
+
+    // New methods for reorg handling and backfill
+    async fn mark_tentative(&self, signature: &str, slot: u64, block_hash: &str) -> Result<()>;
+    async fn mark_finalized(&self, slot: u64, block_hash: &str) -> Result<()>;
+    async fn get_tentative_transactions(&self, slot: u64) -> Result<Vec<String>>;
+    async fn rollback_slot(&self, slot: u64) -> Result<()>;
+    async fn get_block_hash(&self, slot: u64) -> Result<Option<String>>;
+
+    // Backfill progress tracking
+    async fn save_backfill_progress(&self, slot: u64) -> Result<()>;
+    async fn load_backfill_progress(&self) -> Result<Option<u64>>;
+    async fn mark_backfill_complete(&self) -> Result<()>;
 }
 
 /// Database storage manager for the indexer.
@@ -131,6 +143,57 @@ impl Storage {
         .execute(&self.pool)
         .await?;
 
+        // Finalized blocks table
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS _solana_indexer_finalized_blocks (
+                slot BIGINT PRIMARY KEY,
+                block_hash TEXT NOT NULL,
+                finalized_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Tentative transactions table
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS _solana_indexer_tentative (
+                signature TEXT PRIMARY KEY,
+                slot BIGINT NOT NULL,
+                block_hash TEXT NOT NULL,
+                indexed_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Index for tentative slots
+        sqlx::query(
+            r"
+            CREATE INDEX IF NOT EXISTS idx_tentative_slot
+            ON _solana_indexer_tentative(slot)
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Backfill progress table
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS _solana_indexer_backfill_progress (
+                id SERIAL PRIMARY KEY,
+                last_slot BIGINT NOT NULL,
+                is_complete BOOLEAN DEFAULT FALSE,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -162,14 +225,25 @@ impl Storage {
     /// # }
     /// ```
     pub async fn is_processed(&self, signature: &str) -> Result<bool> {
-        let result = sqlx::query_scalar::<_, bool>(
+        let processed = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM _solana_indexer_processed WHERE signature = $1)",
         )
         .bind(signature)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(result)
+        if processed {
+            return Ok(true);
+        }
+
+        let tentative = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM _solana_indexer_tentative WHERE signature = $1)",
+        )
+        .bind(signature)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(tentative)
     }
 
     /// Marks a transaction as processed.
@@ -273,6 +347,141 @@ impl Storage {
     pub async fn close(self) {
         self.pool.close().await;
     }
+
+    pub async fn mark_tentative(&self, signature: &str, slot: u64, block_hash: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO _solana_indexer_tentative (signature, slot, block_hash) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        )
+        .bind(signature)
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .bind(block_hash)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_finalized(&self, slot: u64, block_hash: &str) -> Result<()> {
+        // Add to finalized blocks table
+        sqlx::query(
+            "INSERT INTO _solana_indexer_finalized_blocks (slot, block_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .bind(block_hash)
+        .execute(&self.pool)
+        .await?;
+
+        // Move tentative transactions for this slot to processed table
+        sqlx::query(
+            r"
+            INSERT INTO _solana_indexer_processed (signature, slot, indexed_at)
+            SELECT signature, slot, indexed_at 
+            FROM _solana_indexer_tentative 
+            WHERE slot = $1
+            ON CONFLICT (signature) DO NOTHING
+            ",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .execute(&self.pool)
+        .await?;
+
+        // Clean up tentative table
+        sqlx::query("DELETE FROM _solana_indexer_tentative WHERE slot = $1")
+            .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_tentative_transactions(&self, slot: u64) -> Result<Vec<String>> {
+        let signatures = sqlx::query_scalar::<_, String>(
+            "SELECT signature FROM _solana_indexer_tentative WHERE slot = $1",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(signatures)
+    }
+
+    pub async fn rollback_slot(&self, slot: u64) -> Result<()> {
+        let slot_i64 = i64::try_from(slot).unwrap_or(i64::MAX);
+
+        // Start a transaction would be better, but for now sequential deletes
+        // Delete from tentative
+        sqlx::query("DELETE FROM _solana_indexer_tentative WHERE slot = $1")
+            .bind(slot_i64)
+            .execute(&self.pool)
+            .await?;
+
+        // Delete from processed (idempotency)
+        sqlx::query("DELETE FROM _solana_indexer_processed WHERE slot = $1")
+            .bind(slot_i64)
+            .execute(&self.pool)
+            .await?;
+
+        // Delete from finalized blocks
+        sqlx::query("DELETE FROM _solana_indexer_finalized_blocks WHERE slot = $1")
+            .bind(slot_i64)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_block_hash(&self, slot: u64) -> Result<Option<String>> {
+        let hash = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT block_hash FROM _solana_indexer_finalized_blocks WHERE slot = $1",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .fetch_one(&self.pool)
+        .await?;
+
+        if hash.is_some() {
+            return Ok(hash);
+        }
+
+        let hash = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT block_hash FROM _solana_indexer_tentative WHERE slot = $1 LIMIT 1",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(hash)
+    }
+
+    pub async fn save_backfill_progress(&self, slot: u64) -> Result<()> {
+        sqlx::query(
+            r"
+            INSERT INTO _solana_indexer_backfill_progress (id, last_slot, updated_at) 
+            VALUES (1, $1, NOW())
+            ON CONFLICT (id) DO UPDATE SET last_slot = $1, updated_at = NOW()
+            ",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn load_backfill_progress(&self) -> Result<Option<u64>> {
+        let slot = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT last_slot FROM _solana_indexer_backfill_progress WHERE id = 1",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(slot.map(|s| s.try_into().unwrap_or(0)))
+    }
+
+    pub async fn mark_backfill_complete(&self) -> Result<()> {
+        sqlx::query(
+            "UPDATE _solana_indexer_backfill_progress SET is_complete = TRUE, updated_at = NOW() WHERE id = 1",
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -299,6 +508,38 @@ impl StorageBackend for Storage {
 
     fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    async fn mark_tentative(&self, signature: &str, slot: u64, block_hash: &str) -> Result<()> {
+        self.mark_tentative(signature, slot, block_hash).await
+    }
+
+    async fn mark_finalized(&self, slot: u64, block_hash: &str) -> Result<()> {
+        self.mark_finalized(slot, block_hash).await
+    }
+
+    async fn get_tentative_transactions(&self, slot: u64) -> Result<Vec<String>> {
+        self.get_tentative_transactions(slot).await
+    }
+
+    async fn rollback_slot(&self, slot: u64) -> Result<()> {
+        self.rollback_slot(slot).await
+    }
+
+    async fn get_block_hash(&self, slot: u64) -> Result<Option<String>> {
+        self.get_block_hash(slot).await
+    }
+
+    async fn save_backfill_progress(&self, slot: u64) -> Result<()> {
+        self.save_backfill_progress(slot).await
+    }
+
+    async fn load_backfill_progress(&self) -> Result<Option<u64>> {
+        self.load_backfill_progress().await
+    }
+
+    async fn mark_backfill_complete(&self) -> Result<()> {
+        self.mark_backfill_complete().await
     }
 }
 

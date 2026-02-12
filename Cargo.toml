@@ -28,6 +28,7 @@ tokio = { version = "1.49.0", features = ["full"] }
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 rayon = "1.11.0"
 wiremock = "0.6.5"
+log = "0.4.29"
 
 [[bin]]
 name = "solana-indexer"

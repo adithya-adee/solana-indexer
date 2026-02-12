@@ -156,6 +156,39 @@ let config = SolanaIndexerConfigBuilder::new()
     .build()?;
 ```
 
+### Backfill Configuration
+
+To enable backfill of historical data with concurrent processing and reorg handling:
+
+```rust
+use solana_indexer::config::BackfillConfig;
+
+let backfill_config = BackfillConfig {
+    enabled: true,
+    start_slot: Some(150_000_000),      // Optional: Start from specific slot
+    end_slot: Some(150_005_000),        // Optional: End at specific slot
+    batch_size: 100,                    // Transactions per batch
+    concurrency: 50,                    // Concurrent requests
+    enable_reorg_handling: true,        // Track reorgs
+    finalization_check_interval: 10,    // Slots between finalization checks
+};
+
+let config = SolanaIndexerConfigBuilder::new()
+    .with_rpc("...")
+    .with_database("...")
+    .program_id("...")
+    .with_backfill(backfill_config)
+    .build()?;
+
+let indexer = SolanaIndexer::new(config).await?;
+
+// Run backfill
+indexer.start_backfill().await?;
+
+// Then start real-time indexing
+indexer.start().await?;
+```
+
 ## Database Setup
 
 The SDK automatically creates the required schema:

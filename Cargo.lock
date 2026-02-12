@@ -3963,6 +3963,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "honggfuzz",
+ "log",
  "quinn-proto",
  "rayon",
  "serde",

@@ -41,6 +41,9 @@ pub struct SolanaIndexerConfig {
 
     /// Strategy for determining where to start indexing from
     pub start_strategy: StartStrategy,
+
+    /// Backfill configuration
+    pub backfill: BackfillConfig,
 }
 
 impl SolanaIndexerConfig {
@@ -191,6 +194,45 @@ pub enum StartStrategy {
     Resume,
 }
 
+/// Configuration for backfill operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackfillConfig {
+    /// Enable backfill mode
+    pub enabled: bool,
+
+    /// Start slot for backfill (None = from genesis/earliest)
+    pub start_slot: Option<u64>,
+
+    /// End slot for backfill (None = to latest)
+    pub end_slot: Option<u64>,
+
+    /// Batch size for signature fetching
+    pub batch_size: usize,
+
+    /// Concurrency level for processing
+    pub concurrency: usize,
+
+    /// Enable reorg detection and handling
+    pub enable_reorg_handling: bool,
+
+    /// Interval for checking finalized blocks (in slots)
+    pub finalization_check_interval: u64,
+}
+
+impl Default for BackfillConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            start_slot: None,
+            end_slot: None,
+            batch_size: 100,
+            concurrency: 50,
+            enable_reorg_handling: true,
+            finalization_check_interval: 32,
+        }
+    }
+}
+
 /// Builder for `SolanaIndexerConfig`.
 ///
 /// This builder provides a fluent API for constructing `SolanaIndexerConfig` instances
@@ -222,6 +264,7 @@ pub struct SolanaIndexerConfigBuilder {
     source: Option<SourceConfig>,
     indexing_mode: Option<IndexingMode>,
     start_strategy: Option<StartStrategy>,
+    backfill: Option<BackfillConfig>,
 }
 
 impl SolanaIndexerConfigBuilder {
@@ -476,6 +519,13 @@ impl SolanaIndexerConfigBuilder {
         self
     }
 
+    /// Sets the backfill configuration.
+    #[must_use]
+    pub fn with_backfill(mut self, config: BackfillConfig) -> Self {
+        self.backfill = Some(config);
+        self
+    }
+
     /// Builds and validates the configuration.
     ///
     /// # Errors
@@ -526,6 +576,7 @@ impl SolanaIndexerConfigBuilder {
             source,
             indexing_mode: self.indexing_mode.unwrap_or_default(),
             start_strategy: self.start_strategy.unwrap_or_default(),
+            backfill: self.backfill.unwrap_or_default(),
         })
     }
 }

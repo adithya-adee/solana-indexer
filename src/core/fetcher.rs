@@ -9,7 +9,9 @@ use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcTransactionConfig;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::Signature;
-use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
+use solana_transaction_status::{
+    EncodedConfirmedTransactionWithStatusMeta, UiConfirmedBlock, UiTransactionEncoding,
+};
 
 /// Transaction fetcher for retrieving full transaction details.
 ///
@@ -304,6 +306,72 @@ impl Fetcher {
                     "Failed to get program accounts for {pid}: {e}"
                 ))
             })
+        })
+        .await
+        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+    }
+
+    /// Fetches a block by slot.
+    pub async fn fetch_block(&self, slot: u64) -> Result<UiConfirmedBlock> {
+        let rpc_url = self.rpc_url.clone();
+
+        let max_retries = 5;
+        let mut attempt = 0;
+
+        loop {
+            attempt += 1;
+            let rpc_url_clone = rpc_url.clone();
+
+            let result = tokio::task::spawn_blocking(move || {
+                let rpc_client =
+                    RpcClient::new_with_commitment(rpc_url_clone, CommitmentConfig::confirmed());
+                // Using get_block_with_encoding
+                let config = solana_client::rpc_config::RpcBlockConfig {
+                    encoding: Some(UiTransactionEncoding::JsonParsed),
+                    transaction_details: None,
+                    rewards: None,
+                    commitment: Some(CommitmentConfig::finalized()),
+                    max_supported_transaction_version: Some(0),
+                };
+                rpc_client.get_block_with_config(slot, config).map_err(|e| {
+                    SolanaIndexerError::RpcError(format!("Failed to fetch block {slot}: {e}"))
+                })
+            })
+            .await
+            .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?;
+
+            match result {
+                Ok(block) => return Ok(block),
+                Err(e) => {
+                    // Check if oversight/skip (optional handling)
+                    // But for general errors:
+                    if attempt >= max_retries {
+                        return Err(e);
+                    }
+
+                    let backoff = std::time::Duration::from_millis(100 * (1 << attempt));
+                    log::warn!(
+                        "⚠️ Fetch block failed for {slot} (Attempt {attempt}/{max_retries}): {e}. Retrying...",
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+
+    /// Gets the latest finalized slot.
+    pub async fn get_latest_finalized_slot(&self) -> Result<u64> {
+        let rpc_url = self.rpc_url.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            rpc_client
+                .get_slot_with_commitment(CommitmentConfig::finalized())
+                .map_err(|e| {
+                    SolanaIndexerError::RpcError(format!(
+                        "Failed to get latest finalized slot: {e}"
+                    ))
+                })
         })
         .await
         .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?

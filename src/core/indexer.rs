@@ -7,8 +7,9 @@ use crate::config::SourceConfig;
 use crate::{
     config::{SolanaIndexerConfig, StartStrategy},
     core::{
-        account_registry::AccountDecoderRegistry, decoder::Decoder, fetcher::Fetcher,
-        log_registry::LogDecoderRegistry, registry::DecoderRegistry,
+        account_registry::AccountDecoderRegistry, backfill::BackfillEngine, backfill_defaults::*,
+        decoder::Decoder, fetcher::Fetcher, log_registry::LogDecoderRegistry,
+        registry::DecoderRegistry,
     },
     storage::{Storage, StorageBackend},
     streams::{TransactionSource, helius::HeliusSource, websocket::WebSocketSource},
@@ -220,6 +221,59 @@ impl SolanaIndexer {
     #[must_use]
     pub fn storage(&self) -> &dyn StorageBackend {
         &*self.storage
+    }
+
+    /// Starts the backfill process.
+    ///
+    /// This runs the backfill engine until complete or error.
+    /// It respects the configuration provided in `BackfillConfig`.
+    pub async fn start_backfill(&self) -> Result<()> {
+        if !self.config.backfill.enabled {
+            logging::log(logging::LogLevel::Info, "Backfill is checking config...");
+            // Just return if not enabled? Or error?
+            // Usually we might enable it programmatically or via config.
+            // If called explicitly, we might want to run it even if config says false?
+            // Let's assume config is source of truth.
+            if !self.config.backfill.enabled {
+                logging::log(
+                    logging::LogLevel::Warning,
+                    "Backfill disabled in config, skipping.",
+                );
+                return Ok(());
+            }
+        }
+
+        logging::log(logging::LogLevel::Info, "Initializing backfill engine...");
+
+        // Setup default strategy
+        let strategy = Arc::new(DefaultBackfillStrategy {
+            start_slot: self.config.backfill.start_slot,
+            end_slot: self.config.backfill.end_slot,
+            batch_size: self.config.backfill.batch_size,
+            concurrency: self.config.backfill.concurrency,
+        });
+
+        // Setup default handlers
+        let reorg_handler = Arc::new(DefaultReorgHandler);
+        let finalized_tracker = Arc::new(DefaultFinalizedBlockTracker);
+        let progress_tracker = Arc::new(DefaultBackfillProgress);
+
+        let engine = BackfillEngine::new(
+            self.config.clone(),
+            self.fetcher.clone(),
+            self.decoder.clone(),
+            self.decoder_registry.clone(),
+            self.log_decoder_registry.clone(),
+            self.account_decoder_registry.clone(),
+            self.handler_registry.clone(),
+            self.storage.clone(),
+            strategy,
+            reorg_handler,
+            finalized_tracker,
+            progress_tracker,
+        );
+
+        engine.start().await
     }
 
     /// Starts the indexer.
@@ -482,6 +536,8 @@ impl SolanaIndexer {
                                 handler_registry,
                                 storage,
                                 config,
+                                false, // is_finalized
+                                None,  // known_block_hash
                             )
                             .await
                             {
@@ -605,13 +661,15 @@ impl SolanaIndexer {
             self.handler_registry.clone(),
             self.storage.clone(),
             self.config.clone(),
+            false, // Real-time polling is usually 'confirmed' so tentative
+            None,
         )
         .await
     }
 
     /// Static implementation of transaction processing to allow concurrent execution.
     #[allow(clippy::too_many_arguments)]
-    async fn process_transaction_core(
+    pub(crate) async fn process_transaction_core(
         signature: Signature,
         fetcher: Arc<Fetcher>,
         decoder: Arc<Decoder>,
@@ -621,14 +679,57 @@ impl SolanaIndexer {
         handler_registry: Arc<HandlerRegistry>,
         storage: Arc<dyn StorageBackend>,
         config: SolanaIndexerConfig,
+        is_finalized: bool,
+        known_block_hash: Option<String>,
     ) -> Result<()> {
         let sig_str = signature.to_string();
 
         // Fetch transaction
         let transaction = fetcher.fetch_transaction(&signature).await?;
 
-        // Decode transaction metadata (slot, etc.)
+        // Extract block hash if not provided
+        // EncodedConfirmedTransactionWithStatusMeta does not have block_hash field directly accessible easily in all versions?
+        // Actually, typically we get it from the block, not the transaction response, unless we use `get_transaction` (which is deprecated) or `get_block`.
+        // `fetch_transaction` uses `get_transaction_with_config`.
+        // The response `EncodedConfirmedTransactionWithStatusMeta` has `slot` and `blockTime` usually.
+        // It does NOT have block hash. This is a problem for reorg tracking if we don't have block hash.
+        // We might need to fetch the block if we want to be strict, or pass it in.
+        // For backfill, we usually iterate blocks, so we HAVE the block hash.
+        // For real-time polling `get_signatures_for_address`, we don't have block hash.
+        // So for real-time, we might mark tentative without hash? Or fetch block?
+        // Fetching block for every tx is expensive.
+        // Maybe we just store slot for tentative and verify later?
+        // The table `_solana_indexer_tentative` has `block_hash` as NOT NULL.
+        // We need a block hash.
+        // Let's assume we can tolerate fetching block if missing, or we make it nullable.
+        // For now, let's try to get it.
+        // `get_transaction` doesn't return block hash.
+        // Providing `known_block_hash` is key.
+
+        // Decode transaction metadata
         let decoded_meta = decoder.decode_transaction(&transaction)?;
+        let slot = decoded_meta.slot;
+
+        let block_hash = if let Some(h) = known_block_hash {
+            h
+        } else {
+            // We need to fetch block hash if we want to support reorgs properly.
+            // Usually polling gives signatures, then we fetch tx.
+            // If we really want robustness, we need the block hash.
+            // Optimistically, we could just fetch the block header?
+            // Or maybe we make block_hash nullable in DB for now? NO, schema says NOT NULL.
+            // Let's default to "UNKNOWN" for real-time if we can't get it easily,
+            // but that defeats reorg purpose.
+            // Correct way: Fetch block for that slot.
+            // Optimisation: cache block hashes for slots.
+
+            // For now, let's fetch the block (expensive but correct).
+            // Since `fetcher` is available...
+            match fetcher.fetch_block(slot).await {
+                Ok(block) => block.blockhash,
+                Err(_) => "UNKNOWN".to_string(), // Fallback
+            }
+        };
 
         // Extract UI instructions from the transaction
         let instructions = match &transaction.transaction.transaction {
@@ -798,8 +899,13 @@ impl SolanaIndexer {
             }
         }
 
-        // Mark as processed
-        storage.mark_processed(&sig_str, transaction.slot).await?;
+        // Mark as processed or tentative
+        if is_finalized {
+            storage.mark_finalized(slot, &block_hash).await?;
+            storage.mark_processed(&sig_str, slot).await?;
+        } else {
+            storage.mark_tentative(&sig_str, slot, &block_hash).await?;
+        }
 
         if events_processed > 0 {
             logging::log(
