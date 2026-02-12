@@ -114,12 +114,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     indexer.account_decoder_registry_mut().register(Box::new(
         Box::new(UserProfileDecoder) as Box<dyn AccountDecoder<UserProfile>>
-    ));
+    ))?;
 
     indexer.handler_registry_mut().register(
         UserProfile::discriminator(),
         Box::new(Box::new(UserProfileHandler) as Box<dyn EventHandler<UserProfile>>),
-    );
+    )?;
 
     println!("✅ Registered Decoder, Handler, and Schema");
     println!("🔄 Starting Indexer Loop...");

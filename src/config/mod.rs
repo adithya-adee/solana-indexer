@@ -14,6 +14,21 @@ const HELIUS_MAINNET_WS_URL: &str = "wss://mainnet.helius-rpc.com/";
 const HELIUS_DEVNET_RPC_URL: &str = "https://devnet.helius-rpc.com/";
 const HELIUS_DEVNET_WS_URL: &str = "wss://devnet.helius-rpc.com/";
 
+/// Configuration for registry memory limits and monitoring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RegistryConfig {
+    /// Max number of program IDs in the instruction decoder registry (0 = unlimited).
+    pub max_decoder_programs: usize,
+    /// Max number of program IDs in the log decoder registry (0 = unlimited).
+    pub max_log_decoder_programs: usize,
+    /// Max number of account decoders (0 = unlimited).
+    pub max_account_decoders: usize,
+    /// Max number of event handlers (0 = unlimited).
+    pub max_handlers: usize,
+    /// Enable runtime metrics logging.
+    pub enable_metrics: bool,
+}
+
 /// Configuration for `SolanaIndexer` indexer.
 ///
 /// This struct holds all necessary configuration parameters for running
@@ -44,6 +59,9 @@ pub struct SolanaIndexerConfig {
 
     /// Backfill configuration
     pub backfill: BackfillConfig,
+
+    /// Registry configuration (limits and metrics)
+    pub registry: RegistryConfig,
 }
 
 impl SolanaIndexerConfig {
@@ -265,6 +283,7 @@ pub struct SolanaIndexerConfigBuilder {
     indexing_mode: Option<IndexingMode>,
     start_strategy: Option<StartStrategy>,
     backfill: Option<BackfillConfig>,
+    registry: Option<RegistryConfig>,
 }
 
 impl SolanaIndexerConfigBuilder {
@@ -526,6 +545,13 @@ impl SolanaIndexerConfigBuilder {
         self
     }
 
+    /// Sets the registry configuration.
+    #[must_use]
+    pub fn with_registry_config(mut self, config: RegistryConfig) -> Self {
+        self.registry = Some(config);
+        self
+    }
+
     /// Builds and validates the configuration.
     ///
     /// # Errors
@@ -577,6 +603,7 @@ impl SolanaIndexerConfigBuilder {
             indexing_mode: self.indexing_mode.unwrap_or_default(),
             start_strategy: self.start_strategy.unwrap_or_default(),
             backfill: self.backfill.unwrap_or_default(),
+            registry: self.registry.unwrap_or_default(),
         })
     }
 }

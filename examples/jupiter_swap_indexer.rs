@@ -194,13 +194,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     indexer.log_decoder_registry_mut().register(
         jupiter_program_id.to_string(),
         Box::new(Box::new(JupiterLogDecoder) as Box<dyn LogDecoder<JupiterSwapEvent>>),
-    );
+    )?;
 
     // Register the handler
     indexer.handler_registry_mut().register(
         JupiterSwapEvent::discriminator(),
         Box::new(Box::new(handler) as Box<dyn EventHandler<JupiterSwapEvent>>),
-    );
+    )?;
 
     println!("✅ Jupiter Indexer configured and ready.");
     println!("Monitoring: {}\n", jupiter_program_id);

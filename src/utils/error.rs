@@ -59,6 +59,10 @@ pub enum SolanaIndexerError {
     /// error context.
     #[error("Internal error: {0}")]
     InternalError(String),
+
+    /// Error when a registry exceeds its configured capacity.
+    #[error("Registry capacity exceeded: {0}")]
+    RegistryCapacityExceeded(String),
 }
 
 /// Type alias for Results using `SolanaIndexerError`.

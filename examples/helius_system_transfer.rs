@@ -186,13 +186,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(
             Box::new(SystemTransferDecoder) as Box<dyn InstructionDecoder<SystemTransferEvent>>
         ),
-    );
+    )?;
 
     // Register Handler
     indexer.handler_registry_mut().register(
         SystemTransferEvent::discriminator(),
         Box::new(Box::new(handler) as Box<dyn EventHandler<SystemTransferEvent>>),
-    );
+    )?;
 
     println!("🔄 Starting Helius indexer...");
     indexer.start().await?;

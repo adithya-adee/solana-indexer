@@ -184,19 +184,27 @@ async fn test_handler_integration_with_database() {
     let mut indexer = SolanaIndexer::new_with_storage(config, storage.clone());
 
     // Register decoder for System Program (both name and ID)
-    indexer.decoder_registry_mut().register(
-        "system".to_string(),
-        Box::new(Box::new(TestTransferDecoder) as Box<dyn InstructionDecoder<TransferEvent>>),
-    );
-    indexer.decoder_registry_mut().register(
-        "11111111111111111111111111111111".to_string(),
-        Box::new(Box::new(TestTransferDecoder) as Box<dyn InstructionDecoder<TransferEvent>>),
-    );
+    indexer
+        .decoder_registry_mut()
+        .register(
+            "system".to_string(),
+            Box::new(Box::new(TestTransferDecoder) as Box<dyn InstructionDecoder<TransferEvent>>),
+        )
+        .unwrap();
+
+    indexer
+        .decoder_registry_mut()
+        .register(
+            "11111111111111111111111111111111".to_string(),
+            Box::new(Box::new(TestTransferDecoder) as Box<dyn InstructionDecoder<TransferEvent>>),
+        )
+        .unwrap();
 
     let handler: Box<dyn EventHandler<TransferEvent>> = Box::new(TestTransferHandler);
     indexer
         .handler_registry_mut()
-        .register(TransferEvent::discriminator(), Box::new(handler));
+        .register(TransferEvent::discriminator(), Box::new(handler))
+        .unwrap();
 
     // Setup mocks RIGHT before starting to ensure they are top priority (LIFO)
     // Common mocks (Version, Blockhash)

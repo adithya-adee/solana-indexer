@@ -281,7 +281,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     indexer.decoder_registry_mut().register(
         "spl-token".to_string(), // Program name as it appears in parsed instructions
         Box::new(Box::new(SplTransferDecoder) as Box<dyn InstructionDecoder<SplTransferEvent>>),
-    );
+    )?;
 
     println!("✅ Decoder registered for 'spl-token' program\n");
 
@@ -298,7 +298,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The SDK will automatically route SplTransferEvent instances to this handler
     indexer
         .handler_registry_mut()
-        .register(SplTransferEvent::discriminator(), Box::new(handler_box));
+        .register(SplTransferEvent::discriminator(), Box::new(handler_box))?;
 
     println!("✅ Handler registered\n");
 

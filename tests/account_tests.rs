@@ -38,9 +38,11 @@ fn test_account_registry_workflow() {
     let mut registry = AccountDecoderRegistry::new();
 
     // Register the decoder
-    registry.register(Box::new(
-        Box::new(MockUserAccountDecoder) as Box<dyn AccountDecoder<MockUserAccount>>
-    ));
+    registry
+        .register(Box::new(
+            Box::new(MockUserAccountDecoder) as Box<dyn AccountDecoder<MockUserAccount>>
+        ))
+        .unwrap();
 
     // Create a mock account with correct data
     let account_data = MockUserAccount {
@@ -71,9 +73,11 @@ fn test_account_registry_workflow() {
 #[test]
 fn test_account_registry_invalid_data() {
     let mut registry = AccountDecoderRegistry::new();
-    registry.register(Box::new(
-        Box::new(MockUserAccountDecoder) as Box<dyn AccountDecoder<MockUserAccount>>
-    ));
+    registry
+        .register(Box::new(
+            Box::new(MockUserAccountDecoder) as Box<dyn AccountDecoder<MockUserAccount>>
+        ))
+        .unwrap();
 
     // Account with wrong discriminator
     let account_data = MockUserAccount {

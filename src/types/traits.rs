@@ -337,10 +337,11 @@ where
 pub struct HandlerRegistry {
     /// Map of discriminators to handlers
     handlers: std::collections::HashMap<[u8; 8], Box<dyn DynamicEventHandler>>,
+    metrics: crate::core::registry_metrics::RegistryMetrics,
 }
 
 impl HandlerRegistry {
-    /// Creates a new empty handler registry.
+    /// Creates a new empty handler registry with unlimited capacity.
     ///
     /// # Example
     ///
@@ -353,6 +354,18 @@ impl HandlerRegistry {
     pub fn new() -> Self {
         Self {
             handlers: std::collections::HashMap::new(),
+            metrics: crate::core::registry_metrics::RegistryMetrics::new("EventHandler", 0),
+        }
+    }
+
+    /// Creates a new handler registry with a specific capacity limit.
+    pub fn new_bounded(config: &crate::config::RegistryConfig) -> Self {
+        Self {
+            handlers: std::collections::HashMap::new(),
+            metrics: crate::core::registry_metrics::RegistryMetrics::new(
+                "EventHandler",
+                config.max_handlers,
+            ),
         }
     }
 
@@ -371,8 +384,21 @@ impl HandlerRegistry {
     /// let mut registry = HandlerRegistry::new();
     /// // registry.register([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08], handler);
     /// ```
-    pub fn register(&mut self, discriminator: [u8; 8], handler: Box<dyn DynamicEventHandler>) {
+    pub fn register(
+        &mut self,
+        discriminator: [u8; 8],
+        handler: Box<dyn DynamicEventHandler>,
+    ) -> Result<()> {
+        if !self.handlers.contains_key(&discriminator) && self.metrics.is_full() {
+            return Err(SolanaIndexerError::RegistryCapacityExceeded(format!(
+                "EventHandler registry full (limit: {})",
+                self.metrics.capacity_limit
+            )));
+        }
+
         self.handlers.insert(discriminator, handler);
+        self.metrics.inc_registered();
+        Ok(())
     }
 
     /// Handles an event by dispatching to the appropriate handler.
@@ -410,13 +436,18 @@ impl HandlerRegistry {
         db: &PgPool,
         signature: &str,
     ) -> Result<()> {
+        self.metrics.inc_calls();
         let handler = self.handlers.get(discriminator).ok_or_else(|| {
             SolanaIndexerError::DecodingError(format!(
                 "No handler registered for discriminator: {discriminator:?}"
             ))
         })?;
 
-        handler.handle_dynamic(event_data, db, signature).await
+        let result = handler.handle_dynamic(event_data, db, signature).await;
+        if result.is_ok() {
+            self.metrics.inc_hits();
+        }
+        result
     }
 
     /// Returns the number of registered handlers.
@@ -447,6 +478,11 @@ impl HandlerRegistry {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()
+    }
+
+    /// Returns the metrics for this registry.
+    pub fn metrics(&self) -> &crate::core::registry_metrics::RegistryMetrics {
+        &self.metrics
     }
 }
 
@@ -517,7 +553,7 @@ mod tests {
         let discriminator = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
 
         let handler = Box::new(MockDynamicHandler { discriminator });
-        registry.register(discriminator, handler);
+        registry.register(discriminator, handler).unwrap();
 
         assert_eq!(registry.len(), 1);
         assert!(!registry.is_empty());

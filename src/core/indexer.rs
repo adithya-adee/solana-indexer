@@ -91,10 +91,11 @@ impl SolanaIndexer {
 
         let fetcher = Arc::new(Fetcher::new(config.rpc_url()));
         let decoder = Arc::new(Decoder::new());
-        let decoder_registry = Arc::new(DecoderRegistry::new());
-        let log_decoder_registry = Arc::new(LogDecoderRegistry::new());
-        let account_decoder_registry = Arc::new(AccountDecoderRegistry::new());
-        let handler_registry = Arc::new(HandlerRegistry::new());
+        let decoder_registry = Arc::new(DecoderRegistry::new_bounded(&config.registry));
+        let log_decoder_registry = Arc::new(LogDecoderRegistry::new_bounded(&config.registry));
+        let account_decoder_registry =
+            Arc::new(AccountDecoderRegistry::new_bounded(&config.registry));
+        let handler_registry = Arc::new(HandlerRegistry::new_bounded(&config.registry));
 
         Ok(Self {
             config,
@@ -115,10 +116,11 @@ impl SolanaIndexer {
     pub fn new_with_storage(config: SolanaIndexerConfig, storage: Arc<dyn StorageBackend>) -> Self {
         let fetcher = Arc::new(Fetcher::new(config.rpc_url()));
         let decoder = Arc::new(Decoder::new());
-        let decoder_registry = Arc::new(DecoderRegistry::new());
-        let log_decoder_registry = Arc::new(LogDecoderRegistry::new());
-        let account_decoder_registry = Arc::new(AccountDecoderRegistry::new());
-        let handler_registry = Arc::new(HandlerRegistry::new());
+        let decoder_registry = Arc::new(DecoderRegistry::new_bounded(&config.registry));
+        let log_decoder_registry = Arc::new(LogDecoderRegistry::new_bounded(&config.registry));
+        let account_decoder_registry =
+            Arc::new(AccountDecoderRegistry::new_bounded(&config.registry));
+        let handler_registry = Arc::new(HandlerRegistry::new_bounded(&config.registry));
 
         Self {
             config,
@@ -372,6 +374,10 @@ impl SolanaIndexer {
                         let duration_ms =
                             u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
                         logging::log_batch(processed, processed, duration_ms);
+
+                        // Report metrics occasionally (e.g., every batch)
+                        // In a real implementation, we might want to do this less frequently (timer-based)
+                        self.report_metrics();
                     }
                 }
                 Err(e) => match e {
@@ -461,6 +467,7 @@ impl SolanaIndexer {
                         let duration_ms =
                             u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
                         logging::log_batch(processed_count, processed_count, duration_ms);
+                        self.report_metrics();
                     }
                 }
                 Err(e) => {
@@ -564,6 +571,7 @@ impl SolanaIndexer {
                             logging::LogLevel::Info,
                             &format!("Dispatched {} transactions", processed_count),
                         );
+                        self.report_metrics();
                     }
                 }
                 Err(e) => {
@@ -665,6 +673,16 @@ impl SolanaIndexer {
             None,
         )
         .await
+    }
+
+    /// Logs metrics for all registries if metrics are enabled.
+    fn report_metrics(&self) {
+        if self.config.registry.enable_metrics {
+            self.decoder_registry.metrics().report();
+            self.log_decoder_registry.metrics().report();
+            self.account_decoder_registry.metrics().report();
+            self.handler_registry.metrics().report();
+        }
     }
 
     /// Static implementation of transaction processing to allow concurrent execution.

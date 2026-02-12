@@ -23,12 +23,14 @@ fn test_register_and_decode() {
     let mut registry = DecoderRegistry::new();
     let registry_key = "spl-token".to_string();
 
-    registry.register(
-        registry_key.clone(),
-        Box::new(MockDecoder {
-            should_succeed: true,
-        }),
-    );
+    registry
+        .register(
+            registry_key.clone(),
+            Box::new(MockDecoder {
+                should_succeed: true,
+            }),
+        )
+        .unwrap();
 
     // Mock an instruction that matches the registered program
     let instruction = UiInstruction::Parsed(UiParsedInstruction::Parsed(ParsedInstruction {
@@ -48,12 +50,14 @@ fn test_register_and_decode() {
 #[test]
 fn test_decode_no_matching_decoder() {
     let mut registry = DecoderRegistry::new();
-    registry.register(
-        "other-program".to_string(),
-        Box::new(MockDecoder {
-            should_succeed: true,
-        }),
-    );
+    registry
+        .register(
+            "other-program".to_string(),
+            Box::new(MockDecoder {
+                should_succeed: true,
+            }),
+        )
+        .unwrap();
 
     let instruction = UiInstruction::Parsed(UiParsedInstruction::Parsed(ParsedInstruction {
         program: "spl-token".to_string(),
@@ -69,12 +73,14 @@ fn test_decode_no_matching_decoder() {
 #[test]
 fn test_decode_decoder_returns_none() {
     let mut registry = DecoderRegistry::new();
-    registry.register(
-        "spl-token".to_string(),
-        Box::new(MockDecoder {
-            should_succeed: false,
-        }),
-    );
+    registry
+        .register(
+            "spl-token".to_string(),
+            Box::new(MockDecoder {
+                should_succeed: false,
+            }),
+        )
+        .unwrap();
 
     let instruction = UiInstruction::Parsed(UiParsedInstruction::Parsed(ParsedInstruction {
         program: "spl-token".to_string(),

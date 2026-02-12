@@ -279,6 +279,7 @@ mod tests {
             indexing_mode: crate::config::IndexingMode::inputs(),
             start_strategy: crate::config::StartStrategy::Latest,
             backfill: Default::default(),
+            registry: Default::default(),
         };
 
         let poller = Poller::new(config);

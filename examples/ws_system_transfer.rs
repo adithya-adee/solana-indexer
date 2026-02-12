@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(
             Box::new(SystemTransferDecoder) as Box<dyn InstructionDecoder<SystemTransferEvent>>
         ),
-    );
+    )?;
 
     // ============================================================================================
     // Register Handler
@@ -192,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handler: Box<dyn EventHandler<SystemTransferEvent>> = Box::new(SystemTransferHandler);
     indexer
         .handler_registry_mut()
-        .register(SystemTransferEvent::discriminator(), Box::new(handler));
+        .register(SystemTransferEvent::discriminator(), Box::new(handler))?;
 
     // ============================================================================================
     // Start Indexing

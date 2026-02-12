@@ -139,7 +139,14 @@ async fn test_idempotency_duplicate_transactions() {
                 "transaction": {
                     "signatures": [test_signature],
                     "message": {
-                        "accountKeys": [],
+                        "accountKeys": [
+                            {
+                                "pubkey": "11111111111111111111111111111111",
+                                "signer": true,
+                                "source": "transaction",
+                                "writable": true
+                            }
+                        ],
                         "instructions": [],
                         "recentBlockhash": "11111111111111111111111111111111"
                     }
@@ -162,6 +169,24 @@ async fn test_idempotency_duplicate_transactions() {
         .mount(&mock_server)
         .await;
 
+    Mock::given(method("POST"))
+        .and(body_string_contains("getBlock"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "blockhash": "11111111111111111111111111111111",
+                "previousBlockhash": "11111111111111111111111111111111",
+                "parentSlot": 123455,
+                "transactions": [],
+                "rewards": [],
+                "blockTime": 1678888888,
+                "blockHeight": 123456
+            },
+            "id": 1
+        })))
+        .mount(&mock_server)
+        .await;
+
     let storage = Arc::new(
         Storage::new(&database_url)
             .await
@@ -170,7 +195,7 @@ async fn test_idempotency_duplicate_transactions() {
     storage.initialize().await.expect("Failed to initialize");
 
     // Clean up
-    let _ = sqlx::query("DELETE FROM _solana_indexer_processed WHERE signature = $1")
+    let _ = sqlx::query("DELETE FROM _solana_indexer_tentative WHERE signature = $1")
         .bind(test_signature)
         .execute(storage.pool())
         .await;
@@ -190,7 +215,7 @@ async fn test_idempotency_duplicate_transactions() {
 
     // Verify transaction was only stored once
     let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM _solana_indexer_processed WHERE signature = $1",
+        "SELECT COUNT(*) FROM _solana_indexer_tentative WHERE signature = $1",
     )
     .bind(test_signature)
     .fetch_one(storage.pool())
@@ -200,7 +225,7 @@ async fn test_idempotency_duplicate_transactions() {
     assert_eq!(count, 1, "Transaction should only be stored once");
 
     // Clean up
-    let _ = sqlx::query("DELETE FROM _solana_indexer_processed WHERE signature = $1")
+    let _ = sqlx::query("DELETE FROM _solana_indexer_tentative WHERE signature = $1")
         .bind(test_signature)
         .execute(storage.pool())
         .await;

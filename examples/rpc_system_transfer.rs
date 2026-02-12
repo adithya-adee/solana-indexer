@@ -283,7 +283,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(
             Box::new(SystemTransferDecoder) as Box<dyn InstructionDecoder<SystemTransferEvent>>
         ),
-    );
+    )?;
 
     println!("✅ Decoder registered for 'system' program\n");
 
@@ -300,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The SDK will automatically route SystemTransferEvent instances to this handler
     indexer
         .handler_registry_mut()
-        .register(SystemTransferEvent::discriminator(), Box::new(handler_box));
+        .register(SystemTransferEvent::discriminator(), Box::new(handler_box))?;
 
     println!("✅ Handler registered\n");
 

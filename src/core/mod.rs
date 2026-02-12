@@ -6,6 +6,7 @@ pub mod fetcher;
 pub mod indexer;
 pub mod log_registry;
 pub mod registry;
+pub mod registry_metrics;
 
 pub use backfill::BackfillEngine;
 pub use backfill_defaults::{
