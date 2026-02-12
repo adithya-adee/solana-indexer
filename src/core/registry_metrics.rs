@@ -43,6 +43,8 @@ impl RegistryMetrics {
     /// # Returns
     ///
     /// `true` if the registry has a limit and successful registration would exceed it.
+    /// Returns `true` if the registry enforces a limit and adding one more item would exceed it.
+    #[must_use]
     pub fn is_full(&self) -> bool {
         if self.capacity_limit == 0 {
             return false;

@@ -1,3 +1,20 @@
+//! Backfill Indexer Example
+//!
+//! This example demonstrates how to configure and run the backfill engine to index
+//! historical data. It showcases:
+//!
+//! 1. **Backfill Configuration**: Setting slot ranges and concurrency.
+//! 2. **Reorg Handling**: Enabling automatic reorg detection and recovery.
+//! 3. **Progress Tracking**: Resuming from saved checkpoints.
+//!
+//! ## Usage
+//!
+//! ```bash
+//! RPC_URL=https://api.mainnet-beta.solana.com \
+//! DATABASE_URL=postgres://... \
+//! PROGRAM_ID=... \
+//! cargo run --example backfill_indexer
+//! ```
 use solana_indexer::config::BackfillConfig;
 use solana_indexer::{SolanaIndexer, SolanaIndexerConfigBuilder};
 use std::env;
@@ -16,13 +33,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure backfill settings
     let backfill_config = BackfillConfig {
         enabled: true,
-        // Start from a specific slot (or None to start from 0/saved progress)
+        // Start from a specific slot (set to None to start from the earliest available or 0).
+        // If resumption is enabled, this will be overridden by the last saved progress if it's higher.
         start_slot: Some(250_000_000),
-        // End at a specific slot (or None to current finalized)
+
+        // End at a specific slot (set to None to continue until the latest finalized block).
         end_slot: Some(250_001_000),
+
+        // Number of transactions to fetch per batch.
         batch_size: 10,
+
+        // Number of concurrent RPC requests. Adjust based on your RPC provider's rate limits.
         concurrency: 5,
+
+        // Enable reorg handling to detect and rollback invalidated blocks.
         enable_reorg_handling: true,
+
+        // Interval (in slots) to check for block finalization updates.
         finalization_check_interval: 100,
     };
 

@@ -64,6 +64,14 @@ impl BackfillEngine {
         }
     }
 
+    /// Starts the backfill process.
+    ///
+    /// This method orchestrates the historical data indexing by:
+    /// 1. Determining the start and end slots via the configured strategy.
+    /// 2. Iterating through slots concurrently.
+    /// 3. Detecting and handling chain reorganizations.
+    /// 4. Filtering blocks for relevant transactions.
+    /// 5. Processing transactions using the standard indexer pipeline.
     pub async fn start(&self) -> Result<()> {
         log::info!("Starting backfill engine...");
 
@@ -126,7 +134,9 @@ impl BackfillEngine {
                                         // UiTransaction -> Message -> AccountKeys
                                         match &ui_tx.message {
                                             UiMessage::Parsed(msg) => {
-                                                // iterate account keys
+                                                // Iterate over account keys to ensure strict program ID relevance.
+                                                // This robustness check prevents false positives if the signature
+                                                // was associated with multiple instructions or programs.
                                                 let is_relevant =
                                                     msg.account_keys.iter().any(|acc| {
                                                         acc.pubkey

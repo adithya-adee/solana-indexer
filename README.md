@@ -156,38 +156,55 @@ let config = SolanaIndexerConfigBuilder::new()
     .build()?;
 ```
 
-### Backfill Configuration
+### Registry Configuration
 
-To enable backfill of historical data with concurrent processing and reorg handling:
+Configure memory limits and monitoring for the indexer's registries to ensure stability in resource-constrained environments.
+
+```rust
+use solana_indexer::config::RegistryConfig;
+
+let registry_config = RegistryConfig {
+    max_decoder_programs: 100,    // Limit instruction decoders
+    max_log_decoder_programs: 100, // Limit log decoders
+    max_account_decoders: 1000,   // Limit account decoders
+    max_handlers: 50,             // Limit event handlers
+    enable_metrics: true,         // Enable periodic metrics logging
+};
+
+let config = SolanaIndexerConfigBuilder::new()
+    .with_rpc("...")
+    .with_registry_config(registry_config)
+    .build()?;
+```
+
+### Backfill & Reorg Handling
+
+The SDK supports comprehensive historical data backfilling with automatic reorganization handling.
 
 ```rust
 use solana_indexer::config::BackfillConfig;
 
 let backfill_config = BackfillConfig {
     enabled: true,
-    start_slot: Some(150_000_000),      // Optional: Start from specific slot
-    end_slot: Some(150_005_000),        // Optional: End at specific slot
+    start_slot: Some(150_000_000),      // Start slot (Optional)
+    end_slot: Some(150_005_000),        // End slot (Optional)
     batch_size: 100,                    // Transactions per batch
-    concurrency: 50,                    // Concurrent requests
-    enable_reorg_handling: true,        // Track reorgs
-    finalization_check_interval: 10,    // Slots between finalization checks
+    concurrency: 50,                    // Concurrent RPC requests
+    enable_reorg_handling: true,        // Detect and handle chain reorgs
+    finalization_check_interval: 32,    // Slots between finalization checks
 };
 
 let config = SolanaIndexerConfigBuilder::new()
-    .with_rpc("...")
-    .with_database("...")
-    .program_id("...")
     .with_backfill(backfill_config)
+    // ... other config
     .build()?;
-
-let indexer = SolanaIndexer::new(config).await?;
-
-// Run backfill
-indexer.start_backfill().await?;
-
-// Then start real-time indexing
-indexer.start().await?;
 ```
+
+The backfill engine:
+1.  **detects reorgs** by comparing stored block hashes with the canonical chain.
+2.  **rolls back** invalidated data automatically.
+3.  **tracks progress** persistently to allow resuming after restarts.
+4.  **marks slots finalized** only when confirmed by the cluster.
 
 ## Database Setup
 

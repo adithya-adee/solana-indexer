@@ -60,8 +60,9 @@ impl ReorgHandler for DefaultReorgHandler {
             None => return Ok(None), // We haven't processed this slot, so no reorg to detect for us
         };
 
-        // Fetch the current block hash from the chain (finalized)
-        // We use finalized commitment to be sure
+        // Fetch the current block hash from the canonical chain.
+        // We use "finalized" commitment to ensure we are comparing against the immutable truth.
+        // If the stored hash differs from the finalized hash, a reorg occurred.
         let current_block = fetcher.fetch_block(slot).await?;
         let current_hash = current_block.blockhash;
 
