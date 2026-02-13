@@ -18,6 +18,7 @@ The core pipeline consists of the following stages:
 1.  **Input Source (Poller / Subscriber):** Responsible for acquiring raw transaction data.
     *   **Poller:** Periodically queries Solana RPC endpoints for new transaction signatures (e.g., `getSignaturesForAddress`). Ideal for localnet and lower-throughput scenarios.
     *   **Subscriber:** Listens for real-time transaction events via WebSocket connections (e.g., `programSubscribe`). Essential for high-throughput, low-latency production environments.
+    *   **Hybrid (Dual-Stream):** Combines the low latency of WebSockets with the reliability of periodic RPC polling. It uses WebSockets for real-time events and a background poller to detect and fill any gaps (e.g., dropped packets).
 2.  **Fetcher:** For each identified new transaction signature, it retrieves the full transaction details (e.g., `getTransaction`). This includes instruction data, logs, and metadata.
 3.  **Idempotency Tracker:** Before processing, checks a persistent store (`_solana_indexer_processed` table) to prevent re-processing already handled transactions. This ensures data consistency and reliability.
 4.  **Decoder Registry (Developer Extension Point #1):** Routes instructions to registered `InstructionDecoder<T>` implementations.
@@ -90,7 +91,13 @@ SolanaIndexer supports multiple indexing strategies, allowing developers to sele
 *   **Program-Specific WebSocket Subscriptions (Real-time via `with_ws`):**
     *   **Mechanism:** Maintains a persistent WebSocket connection to an RPC node, receiving real-time notifications for transactions involving a specific `PROGRAM_ID`.
     *   **Use Case:** Critical for high-throughput, low-latency production applications requiring immediate data processing.
+    *   **Use Case:** Critical for high-throughput, low-latency production applications requiring immediate data processing.
     *   **Activation:** Configured via `.with_ws(...)`.
+
+*   **Hybrid Dual-Stream (Recommended for Production via `with_hybrid`):**
+    *   **Mechanism:** Runs a `WebSocketSource` for real-time data AND a background `RpcPoller` that periodically checks for "gaps" (missed slots/signatures).
+    *   **Use Case:** Production environments where both speed (WS) and 100% data completeness (RPC backstop) are required.
+    *   **Activation:** Configured via `.with_hybrid(...)`.
 
 *   **General/Multi-Program Indexing (Production Roadmap):**
     *   **Mechanism:** Capabilities to index events or instructions from multiple programs, or to process broad categories of on-chain activity (e.g., all SPL token transfers) without being tied to a single `PROGRAM_ID`. This often involves integrating with specialized data providers (e.g., Helius, Blockdaemon).
@@ -121,6 +128,23 @@ To handle high throughput, the indexer employs a parallel fetch pipeline:
 *   **Worker Pool:** A configurable number of worker threads (`worker_threads`) process transactions concurrently.
 *   **Semaphore Bounding:** Concurrency is limited by a semaphore to prevent overwhelming the RPC provider or local resources.
 *   **Non-Blocking:** The processing loop spawns tasks (`tokio::spawn`) effectively utilizing multicore systems.
+
+### Reorg Detection & Finality Management
+
+SolanaIndexer implements robust blockchain reorganization (reorg) detection and finality tracking to ensure data integrity:
+
+*   **Commitment Levels:** Configurable commitment levels (`Processed`, `Confirmed`, `Finalized`) allow developers to choose the appropriate trade-off between latency and finality guarantees.
+*   **Tentative Transaction Tracking:** Transactions are initially marked as "tentative" in the database until they reach finalized status.
+*   **FinalityMonitor Background Task:** A dedicated background task periodically:
+    *   Fetches the latest finalized slot from the RPC
+    *   Compares block hashes of tentative slots with their finalized counterparts
+    *   Detects reorgs when hashes don't match
+    *   Promotes matching transactions from tentative to finalized status
+*   **Automatic Rollback Handling:** When a reorg is detected:
+    *   Affected transactions are identified
+    *   Registered handlers' `on_rollback()` methods are invoked
+    *   Orphaned data is cleaned up from storage
+*   **Configurable Monitoring:** The finality monitor runs every 10 seconds by default and supports graceful shutdown via cancellation tokens.
 
 ## 6. Extensibility: Developer Extension Points
 
@@ -237,7 +261,23 @@ pub trait EventHandler<T>: Send + Sync + 'static {
     /// * `event` - The typed event to process
     /// * `db` - Database connection pool
     /// * `signature` - Transaction signature for tracking
-    async fn handle(&self, event: T, db: &PgPool, signature: &str) -> Result<()>;
+    async fn handle(&self, event: T, context: &TxMetadata, db: &PgPool) -> Result<()>;
+
+    /// Handles transaction rollback due to blockchain reorganization.
+    ///
+    /// This method is called when a previously processed transaction is
+    /// orphaned due to a reorg. Implement this to define compensating logic
+    /// (e.g., deleting or marking affected database records).
+    ///
+    /// # Default Implementation
+    /// Does nothing (no-op) for backward compatibility.
+    ///
+    /// # Arguments
+    /// * `context` - Metadata of the rolled-back transaction
+    /// * `db` - Database connection pool
+    async fn on_rollback(&self, _context: &TxMetadata, _db: &PgPool) -> Result<()> {
+        Ok(())
+    }
 }
 ```
 
@@ -276,27 +316,39 @@ impl EventHandler<TransferEvent> for TransferHandler {
     async fn handle(
         &self,
         event: TransferEvent,
+        context: &TxMetadata,
         db: &PgPool,
-        signature: &str,
     ) -> Result<()> {
         println!(
-            "Processing Transfer: {} -> {} ({} tokens)",
-            event.from, event.to, event.amount
+            "Processing Transfer at slot {}: {} -> {} ({} tokens)",
+            context.slot, event.from, event.to, event.amount
         );
 
         sqlx::query!(
-            "INSERT INTO spl_transfers (signature, from_wallet, to_wallet, amount, mint)
-             VALUES ($1, $2, $3, $4, $5)
+            "INSERT INTO spl_transfers (signature, from_wallet, to_wallet, amount, mint, slot)
+             VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (signature) DO NOTHING",
-            signature,
+            context.signature,
             event.from.to_string(),
             event.to.to_string(),
             event.amount as i64,
-            event.mint.to_string()
+            event.mint.to_string(),
+            context.slot as i64
         )
         .execute(db)
         .await?;
 
+        Ok(())
+    }
+
+    /// Handle rollback by deleting the orphaned transfer record
+    async fn on_rollback(&self, context: &TxMetadata, db: &PgPool) -> Result<()> {
+        println!("Rolling back transfer at slot {}: {}", context.slot, context.signature);
+        
+        sqlx::query!("DELETE FROM spl_transfers WHERE signature = $1", context.signature)
+            .execute(db)
+            .await?;
+        
         Ok(())
     }
 }
@@ -392,6 +444,7 @@ solana-indexer/
 │   │   ├── mod.rs
 │   │   ├── indexer.rs             // Main orchestrator logic
 │   │   ├── fetcher.rs             // Transaction fetching logic
+│   │   ├── reorg.rs               // Finality monitoring and reorg detection
 │   │   ├── decoder.rs             // IDL-driven and generic data parsing
 │   │   └── registry.rs            // Decoder registry
 │   ├── streams/                   // Data ingestion streams

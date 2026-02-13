@@ -25,7 +25,7 @@ use solana_transaction_status::{
 /// # use solana_sdk::signature::Signature;
 /// # use std::str::FromStr;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let fetcher = Fetcher::new("http://127.0.0.1:8899");
+/// let fetcher = Fetcher::new("http://127.0.0.1:8899", solana_sdk::commitment_config::CommitmentConfig::confirmed());
 ///
 /// let signature = Signature::from_str("5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7")?;
 /// let transaction = fetcher.fetch_transaction(&signature).await?;
@@ -35,6 +35,8 @@ use solana_transaction_status::{
 pub struct Fetcher {
     /// RPC endpoint URL
     rpc_url: String,
+    /// Commitment configuration for fetching
+    commitment: CommitmentConfig,
 }
 
 impl Fetcher {
@@ -48,12 +50,13 @@ impl Fetcher {
     ///
     /// ```
     /// # use solana_indexer::Fetcher;
-    /// let fetcher = Fetcher::new("http://127.0.0.1:8899");
+    /// let fetcher = Fetcher::new("http://127.0.0.1:8899", solana_sdk::commitment_config::CommitmentConfig::confirmed());
     /// ```
     #[must_use]
-    pub fn new(rpc_url: impl Into<String>) -> Self {
+    pub fn new(rpc_url: impl Into<String>, commitment: CommitmentConfig) -> Self {
         Self {
             rpc_url: rpc_url.into(),
+            commitment,
         }
     }
 
@@ -88,7 +91,7 @@ impl Fetcher {
     /// # use solana_sdk::signature::Signature;
     /// # use std::str::FromStr;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let fetcher = Fetcher::new("http://127.0.0.1:8899");
+    /// let fetcher = Fetcher::new("http://127.0.0.1:8899", solana_sdk::commitment_config::CommitmentConfig::confirmed());
     /// let sig = Signature::from_str("5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7")?;
     ///
     /// match fetcher.fetch_transaction(&sig).await {
@@ -117,13 +120,13 @@ impl Fetcher {
             // Let's keep the spawn_blocking wrapping the RPC call.
 
             let rpc_url_clone = rpc_url.clone();
+            let default_commitment = self.commitment;
             let result = tokio::task::spawn_blocking(move || {
-                let rpc_client =
-                    RpcClient::new_with_commitment(rpc_url_clone, CommitmentConfig::confirmed());
+                let rpc_client = RpcClient::new_with_commitment(rpc_url_clone, default_commitment);
 
                 let config = RpcTransactionConfig {
                     encoding: Some(UiTransactionEncoding::JsonParsed),
-                    commitment: Some(CommitmentConfig::confirmed()),
+                    commitment: Some(default_commitment),
                     max_supported_transaction_version: Some(0),
                 };
 
@@ -179,7 +182,7 @@ impl Fetcher {
     /// # use solana_sdk::signature::Signature;
     /// # use std::str::FromStr;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let fetcher = Fetcher::new("http://127.0.0.1:8899");
+    /// let fetcher = Fetcher::new("http://127.0.0.1:8899", solana_sdk::commitment_config::CommitmentConfig::confirmed());
     /// let signatures = vec![
     ///     Signature::from_str("5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7")?,
     /// ];
@@ -203,8 +206,9 @@ impl Fetcher {
         let rpc_url = self.rpc_url.clone();
         let sigs = signatures.to_vec();
 
+        let default_commitment = self.commitment;
         tokio::task::spawn_blocking(move || {
-            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, default_commitment);
 
             // Use rayon for parallel fetching
             let results: Vec<Result<EncodedConfirmedTransactionWithStatusMeta>> = sigs
@@ -212,7 +216,7 @@ impl Fetcher {
                 .map(|sig| {
                     let config = RpcTransactionConfig {
                         encoding: Some(UiTransactionEncoding::JsonParsed), // Use JsonParsed for human-readable instructions
-                        commitment: Some(CommitmentConfig::confirmed()),
+                        commitment: Some(default_commitment),
                         max_supported_transaction_version: Some(0),
                     };
                     rpc_client
@@ -247,8 +251,9 @@ impl Fetcher {
         let rpc_url = self.rpc_url.clone();
         let key = *pubkey;
 
+        let default_commitment = self.commitment;
         tokio::task::spawn_blocking(move || {
-            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, default_commitment);
             rpc_client.get_account(&key).map_err(|e| {
                 SolanaIndexerError::RpcError(format!("Failed to fetch account {key}: {e}"))
             })
@@ -273,8 +278,9 @@ impl Fetcher {
         let rpc_url = self.rpc_url.clone();
         let keys = pubkeys.to_vec();
 
+        let default_commitment = self.commitment;
         tokio::task::spawn_blocking(move || {
-            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, default_commitment);
             rpc_client.get_multiple_accounts(&keys).map_err(|e| {
                 SolanaIndexerError::RpcError(format!("Failed to fetch multiple accounts: {e}"))
             })
@@ -298,14 +304,41 @@ impl Fetcher {
     ) -> Result<Vec<(solana_sdk::pubkey::Pubkey, solana_sdk::account::Account)>> {
         let rpc_url = self.rpc_url.clone();
         let pid = *program_id;
+        let default_commitment = self.commitment;
 
         tokio::task::spawn_blocking(move || {
-            let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, default_commitment);
             rpc_client.get_program_accounts(&pid).map_err(|e| {
-                SolanaIndexerError::RpcError(format!(
-                    "Failed to get program accounts for {pid}: {e}"
-                ))
+                SolanaIndexerError::RpcError(format!("Failed to fetch program accounts: {e}"))
             })
+        })
+        .await
+        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+    }
+
+    /// Fetches a block with a specific commitment level.
+    pub async fn fetch_block_with_commitment(
+        &self,
+        slot: u64,
+        commitment: CommitmentConfig,
+    ) -> Result<UiConfirmedBlock> {
+        let rpc_url = self.rpc_url.clone();
+        tokio::task::spawn_blocking(move || {
+            let rpc_client = RpcClient::new_with_commitment(rpc_url, commitment);
+            rpc_client
+                .get_block_with_config(
+                    slot,
+                    solana_client::rpc_config::RpcBlockConfig {
+                        encoding: Some(UiTransactionEncoding::Base64),
+                        transaction_details: Some(
+                            solana_transaction_status::TransactionDetails::Full,
+                        ),
+                        rewards: Some(false),
+                        commitment: Some(commitment),
+                        max_supported_transaction_version: Some(0),
+                    },
+                )
+                .map_err(|e| SolanaIndexerError::RpcError(e.to_string()))
         })
         .await
         .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
@@ -384,14 +417,20 @@ mod tests {
 
     #[test]
     fn test_fetcher_creation() {
-        let fetcher = Fetcher::new("http://127.0.0.1:8899");
+        let fetcher = Fetcher::new(
+            "http://127.0.0.1:8899",
+            solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+        );
         assert_eq!(fetcher.rpc_url, "http://127.0.0.1:8899");
     }
 
     #[test]
     fn test_fetcher_creation_from_string() {
         let url = String::from("http://localhost:8899");
-        let fetcher = Fetcher::new(url);
+        let fetcher = Fetcher::new(
+            url,
+            solana_sdk::commitment_config::CommitmentConfig::processed(),
+        );
         assert_eq!(fetcher.rpc_url, "http://localhost:8899");
     }
 }

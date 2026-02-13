@@ -26,6 +26,7 @@ pub trait StorageBackend: Send + Sync {
     async fn rollback_slot(&self, slot: u64) -> Result<()>;
     async fn get_block_hash(&self, slot: u64) -> Result<Option<String>>;
     async fn cleanup_stale_tentative_transactions(&self, slot_threshold: u64) -> Result<u64>;
+    async fn get_tentative_slots_le(&self, slot: u64) -> Result<Vec<u64>>;
 
     // Backfill progress tracking
     async fn save_backfill_progress(&self, slot: u64) -> Result<()>;
@@ -448,6 +449,20 @@ impl Storage {
         Ok(result.rows_affected())
     }
 
+    pub async fn get_tentative_slots_le(&self, slot: u64) -> Result<Vec<u64>> {
+        let slots = sqlx::query_scalar::<_, i64>(
+            "SELECT DISTINCT slot FROM _solana_indexer_tentative WHERE slot <= $1 ORDER BY slot ASC",
+        )
+        .bind(i64::try_from(slot).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(slots
+            .into_iter()
+            .map(|s| s.try_into().unwrap_or(0))
+            .collect())
+    }
+
     pub async fn get_block_hash(&self, slot: u64) -> Result<Option<String>> {
         let hash = sqlx::query_scalar::<_, Option<String>>(
             "SELECT block_hash FROM _solana_indexer_finalized_blocks WHERE slot = $1",
@@ -553,6 +568,10 @@ impl StorageBackend for Storage {
     async fn cleanup_stale_tentative_transactions(&self, slot_threshold: u64) -> Result<u64> {
         self.cleanup_stale_tentative_transactions(slot_threshold)
             .await
+    }
+
+    async fn get_tentative_slots_le(&self, slot: u64) -> Result<Vec<u64>> {
+        self.get_tentative_slots_le(slot).await
     }
 
     async fn save_backfill_progress(&self, slot: u64) -> Result<()> {

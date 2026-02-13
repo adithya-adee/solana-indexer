@@ -8,7 +8,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn test_fetch_transaction_success() {
     let mock_server = MockServer::start().await;
-    let fetcher = Fetcher::new(mock_server.uri());
+    let fetcher = Fetcher::new(
+        mock_server.uri(),
+        solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+    );
 
     // Mock version call which RpcClient makes
     Mock::given(method("POST"))
@@ -78,7 +81,10 @@ async fn test_fetch_transaction_success() {
 #[tokio::test]
 async fn test_fetch_transaction_not_found() {
     let mock_server = MockServer::start().await;
-    let fetcher = Fetcher::new(mock_server.uri());
+    let fetcher = Fetcher::new(
+        mock_server.uri(),
+        solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+    );
     let signature = Signature::default();
 
     let response_body = json!({
@@ -101,7 +107,10 @@ async fn test_fetch_transaction_not_found() {
 #[tokio::test]
 async fn test_fetch_transaction_rpc_error() {
     let mock_server = MockServer::start().await;
-    let fetcher = Fetcher::new(mock_server.uri());
+    let fetcher = Fetcher::new(
+        mock_server.uri(),
+        solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+    );
     let signature = Signature::default();
 
     Mock::given(method("POST"))
@@ -116,7 +125,10 @@ async fn test_fetch_transaction_rpc_error() {
 #[tokio::test]
 async fn test_fetch_transactions_batch() {
     let mock_server = MockServer::start().await;
-    let fetcher = Fetcher::new(mock_server.uri());
+    let fetcher = Fetcher::new(
+        mock_server.uri(),
+        solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+    );
 
     // Mock version call
     Mock::given(method("POST"))

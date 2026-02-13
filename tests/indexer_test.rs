@@ -98,9 +98,12 @@ impl StorageBackend for MockStorage {
         Ok(())
     }
 
-    async fn get_tentative_transactions(&self, slot: u64) -> Result<Vec<String>> {
-        let txs = self.tentative_transactions.lock().unwrap();
-        Ok(txs.get(&slot).cloned().unwrap_or_default())
+    async fn get_tentative_transactions(&self, _slot: u64) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
+
+    async fn get_tentative_slots_le(&self, _slot: u64) -> Result<Vec<u64>> {
+        Ok(vec![])
     }
 
     async fn rollback_slot(&self, slot: u64) -> Result<()> {

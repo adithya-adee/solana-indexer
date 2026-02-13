@@ -270,6 +270,17 @@ pub trait EventHandler<T>: Send + Sync + 'static {
     /// ```
     async fn handle(&self, event: T, context: &TxMetadata, db: &PgPool) -> Result<()>;
 
+    /// Called when a previously-confirmed transaction is rolled back (reorg).
+    ///
+    /// This is an optional hook. Default implementation is a no-op.
+    ///
+    /// # Arguments
+    /// * `context` - Metadata about the rolled-back transaction (signature, slot will be invalid now)
+    /// * `db` - Database connection pool
+    async fn on_rollback(&self, _context: &TxMetadata, _db: &PgPool) -> Result<()> {
+        Ok(())
+    }
+
     /// Initializes custom database schema for this handler.
     ///
     /// Override this method to create custom tables. Called once
@@ -277,7 +288,13 @@ pub trait EventHandler<T>: Send + Sync + 'static {
     ///
     /// # Default Implementation
     /// Does nothing (no-op).
-    async fn initialize_schema(&self, _db: &PgPool) -> Result<()> {
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error
+    async fn initialize_schema(&self, pool: &PgPool) -> Result<()> {
+        let _ = pool; // Default implementation does nothing
         Ok(())
     }
 }
@@ -288,26 +305,20 @@ pub trait EventHandler<T>: Send + Sync + 'static {
 /// collection, enabling the handler registry to manage multiple handler types.
 #[async_trait]
 pub trait DynamicEventHandler: Send + Sync {
-    /// Handles an event with dynamic dispatch.
-    ///
-    /// # Arguments
-    ///
-    /// * `event_data` - Raw event data as bytes
-    /// * `context` - The transaction context
-    /// * `db` - Database connection pool
-    ///
-    /// # Errors
-    ///
-    /// Returns `SolanaIndexerError` if handling fails.
+    /// Handles a dynamic event (discriminator + raw bytes).
     async fn handle_dynamic(
         &self,
-        event_data: &[u8],
+        discriminator: &[u8; 8],
+        data: &[u8],
         context: &TxMetadata,
         db: &PgPool,
     ) -> Result<()>;
 
-    /// Returns the event discriminator this handler processes.
-    fn discriminator(&self) -> [u8; 8];
+    /// Handles a rollback for a dynamic event.
+    async fn handle_rollback_dynamic(&self, context: &TxMetadata, db: &PgPool) -> Result<()>;
+
+    /// Initializes schema for the dynamic handler.
+    async fn initialize_schema(&self, pool: &PgPool) -> Result<()>;
 }
 
 /// Automatic conversion from typed handler to dynamic handler.
@@ -318,17 +329,33 @@ where
 {
     async fn handle_dynamic(
         &self,
-        event_data: &[u8],
+        discriminator: &[u8; 8],
+        data: &[u8],
         context: &TxMetadata,
         db: &PgPool,
     ) -> Result<()> {
-        let event = T::try_from_slice(event_data)
-            .map_err(|e| SolanaIndexerError::DecodingError(e.to_string()))?;
+        // Verify discriminator matches
+        if *discriminator != T::discriminator() {
+            return Err(SolanaIndexerError::DecodingError(
+                "Discriminator mismatch".to_string(),
+            ));
+        }
+
+        // Deserialize event
+        let event = T::try_from_slice(data).map_err(|e| {
+            SolanaIndexerError::DecodingError(format!("Failed to deserialize event: {}", e))
+        })?;
+
+        // Delegate to typed handler
         self.handle(event, context, db).await
     }
 
-    fn discriminator(&self) -> [u8; 8] {
-        T::discriminator()
+    async fn handle_rollback_dynamic(&self, context: &TxMetadata, db: &PgPool) -> Result<()> {
+        (**self).on_rollback(context, db).await
+    }
+
+    async fn initialize_schema(&self, pool: &PgPool) -> Result<()> {
+        (**self).initialize_schema(pool).await
     }
 }
 
@@ -413,6 +440,14 @@ impl HandlerRegistry {
         Ok(())
     }
 
+    /// Triggers rollback on all registered handlers.
+    pub async fn handle_rollback(&self, context: &TxMetadata, db: &PgPool) -> Result<()> {
+        for handler in self.handlers.values() {
+            handler.handle_rollback_dynamic(context, db).await?;
+        }
+        Ok(())
+    }
+
     /// Handles an event by dispatching to the appropriate handler.
     ///
     /// # Arguments
@@ -456,7 +491,9 @@ impl HandlerRegistry {
             ))
         })?;
 
-        let result = handler.handle_dynamic(event_data, context, db).await;
+        let result = handler
+            .handle_dynamic(discriminator, event_data, context, db)
+            .await;
         if result.is_ok() {
             self.metrics.inc_hits();
         }
@@ -553,15 +590,29 @@ mod tests {
     impl DynamicEventHandler for MockDynamicHandler {
         async fn handle_dynamic(
             &self,
-            _event_data: &[u8],
+            discriminator: &[u8; 8],
+            _data: &[u8],
+            _context: &crate::types::metadata::TxMetadata,
+            _db: &PgPool,
+        ) -> Result<()> {
+            if *discriminator != self.discriminator {
+                return Err(SolanaIndexerError::DecodingError(
+                    "Discriminator mismatch".to_string(),
+                ));
+            }
+            Ok(())
+        }
+
+        async fn handle_rollback_dynamic(
+            &self,
             _context: &crate::types::metadata::TxMetadata,
             _db: &PgPool,
         ) -> Result<()> {
             Ok(())
         }
 
-        fn discriminator(&self) -> [u8; 8] {
-            self.discriminator
+        async fn initialize_schema(&self, _pool: &PgPool) -> Result<()> {
+            Ok(())
         }
     }
 

@@ -94,7 +94,10 @@ impl SolanaIndexer {
         let storage = Arc::new(Storage::new(&config.database_url).await?);
         storage.initialize().await?;
 
-        let fetcher = Arc::new(Fetcher::new(config.rpc_url()));
+        let fetcher = Arc::new(Fetcher::new(
+            config.rpc_url(),
+            config.commitment_level.into(),
+        ));
         let decoder = Arc::new(Decoder::new());
         let decoder_registry = Arc::new(DecoderRegistry::new_bounded(&config.registry));
         let log_decoder_registry = Arc::new(LogDecoderRegistry::new_bounded(&config.registry));
@@ -120,7 +123,10 @@ impl SolanaIndexer {
     ///
     /// This is useful for testing with mock storage.
     pub fn new_with_storage(config: SolanaIndexerConfig, storage: Arc<dyn StorageBackend>) -> Self {
-        let fetcher = Arc::new(Fetcher::new(config.rpc_url()));
+        let fetcher = Arc::new(Fetcher::new(
+            config.rpc_url(),
+            config.commitment_level.into(),
+        ));
         let decoder = Arc::new(Decoder::new());
         let decoder_registry = Arc::new(DecoderRegistry::new_bounded(&config.registry));
         let log_decoder_registry = Arc::new(LogDecoderRegistry::new_bounded(&config.registry));

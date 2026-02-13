@@ -161,7 +161,7 @@ impl Poller {
         let mut interval = time::interval(poll_interval);
 
         // Initialize fetcher and decoder
-        let fetcher = Fetcher::new(self.config.rpc_url());
+        let fetcher = Fetcher::new(self.config.rpc_url(), self.config.commitment_level.into());
         let decoder = Decoder::new();
 
         println!("Starting poller with RPC: {}", self.config.rpc_url());
@@ -282,6 +282,7 @@ mod tests {
             registry: Default::default(),
             stale_tentative_threshold: 1000,
             worker_threads: 10,
+            commitment_level: crate::config::CommitmentLevel::Confirmed,
         };
 
         let poller = Poller::new(config);

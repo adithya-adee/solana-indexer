@@ -14,6 +14,32 @@ const HELIUS_MAINNET_WS_URL: &str = "wss://mainnet.helius-rpc.com/";
 const HELIUS_DEVNET_RPC_URL: &str = "https://devnet.helius-rpc.com/";
 const HELIUS_DEVNET_WS_URL: &str = "wss://devnet.helius-rpc.com/";
 
+/// Transaction commitment level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CommitmentLevel {
+    Processed,
+    #[default]
+    Confirmed,
+    Finalized,
+}
+
+impl From<CommitmentLevel> for solana_sdk::commitment_config::CommitmentConfig {
+    fn from(level: CommitmentLevel) -> Self {
+        match level {
+            CommitmentLevel::Processed => {
+                solana_sdk::commitment_config::CommitmentConfig::processed()
+            }
+            CommitmentLevel::Confirmed => {
+                solana_sdk::commitment_config::CommitmentConfig::confirmed()
+            }
+            CommitmentLevel::Finalized => {
+                solana_sdk::commitment_config::CommitmentConfig::finalized()
+            }
+        }
+    }
+}
+
 /// Configuration for registry memory limits and monitoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RegistryConfig {
@@ -56,6 +82,9 @@ pub struct SolanaIndexerConfig {
 
     /// Strategy for determining where to start indexing from
     pub start_strategy: StartStrategy,
+
+    /// Desired commitment level for indexing (default: Confirmed)
+    pub commitment_level: CommitmentLevel,
 
     /// Backfill configuration
     pub backfill: BackfillConfig,
@@ -302,6 +331,7 @@ pub struct SolanaIndexerConfigBuilder {
     registry: Option<RegistryConfig>,
     stale_tentative_threshold: Option<u64>,
     worker_threads: Option<usize>,
+    commitment_level: Option<CommitmentLevel>,
 }
 
 impl SolanaIndexerConfigBuilder {
@@ -585,10 +615,16 @@ impl SolanaIndexerConfigBuilder {
     ///
     /// # Arguments
     ///
-    /// * `threads` - Number of concurrent tasks (default: 10)
-    #[must_use]
+    /// Sets the number of worker threads for parallel fetching.
     pub fn with_worker_threads(mut self, threads: usize) -> Self {
-        self.worker_threads = Some(threads);
+        self.worker_threads = Some(threads); // Assuming builder still uses Option<usize>
+        self
+    }
+
+    /// Sets the commitment level for indexing.
+    #[must_use]
+    pub fn with_commitment(mut self, level: CommitmentLevel) -> Self {
+        self.commitment_level = Some(level);
         self
     }
 
@@ -670,6 +706,7 @@ impl SolanaIndexerConfigBuilder {
             registry: self.registry.unwrap_or_default(),
             stale_tentative_threshold: self.stale_tentative_threshold.unwrap_or(1000),
             worker_threads: self.worker_threads.unwrap_or(10),
+            commitment_level: self.commitment_level.unwrap_or_default(),
         })
     }
 }
