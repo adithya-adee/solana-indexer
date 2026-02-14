@@ -23,16 +23,20 @@ use sqlx::PgPool;
 /// # Example
 /// ```no_run
 /// use solana_indexer_sdk::InstructionDecoder;
-/// use solana_transaction_status::UiInstruction;
+/// use solana_transaction_status::{UiInstruction, UiParsedInstruction};
 ///
+/// pub struct MyEvent { pub amount: u64 }
 /// pub struct MyDecoder;
-///
-/// pub struct MyEvent;
 ///
 /// impl InstructionDecoder<MyEvent> for MyDecoder {
 ///     fn decode(&self, instruction: &UiInstruction) -> Option<MyEvent> {
-///         // Parse instruction and return event if successful
-///         None
+///         match instruction {
+///             UiInstruction::Parsed(UiParsedInstruction::Parsed(parsed)) => {
+///                 let amount = parsed.parsed.get("info")?.get("lamports")?.as_u64()?;
+///                 Some(MyEvent { amount })
+///             },
+///             _ => None,
+///         }
 ///     }
 /// }
 /// ```
@@ -52,6 +56,7 @@ pub trait InstructionDecoder<T>: Send + Sync {
 ///
 /// This trait enables the SDK to store and invoke decoders of different
 /// types uniformly. Developers don't implement this directly.
+#[doc(hidden)]
 pub trait DynamicInstructionDecoder: Send + Sync {
     /// Decodes an instruction into discriminator + raw event data.
     fn decode_dynamic(&self, instruction: &UiInstruction) -> Option<([u8; 8], Vec<u8>)>;
@@ -88,6 +93,7 @@ pub trait LogDecoder<T>: Send + Sync {
 }
 
 /// Type-erased log decoder for internal SDK use.
+#[doc(hidden)]
 pub trait DynamicLogDecoder: Send + Sync {
     /// Decodes a log event into discriminator + raw event data.
     fn decode_log_dynamic(&self, event: &ParsedEvent) -> Option<([u8; 8], Vec<u8>)>;
@@ -123,6 +129,7 @@ pub trait AccountDecoder<T>: Send + Sync {
 }
 
 /// Type-erased account decoder for internal SDK use.
+#[doc(hidden)]
 pub trait DynamicAccountDecoder: Send + Sync {
     /// Decodes an account into discriminator + raw data.
     fn decode_account_dynamic(
@@ -176,43 +183,24 @@ pub trait SchemaInitializer: Send + Sync {
 /// # Example
 ///
 /// ```no_run
-/// use solana_indexer_sdk::{EventHandler, SolanaIndexerError};
+/// use solana_indexer_sdk::{EventHandler, SolanaIndexerError, TxMetadata};
 /// use async_trait::async_trait;
 /// use sqlx::PgPool;
 ///
-/// // Define a custom event type
 /// #[derive(Debug, Clone)]
-/// pub struct TransferEvent {
-///     pub from: String,
-///     pub to: String,
-///     pub amount: u64,
-/// }
+/// pub struct MyEvent { pub amount: u64 }
 ///
-/// // Implement the handler
-/// pub struct TransferHandler;
+/// pub struct MyHandler;
 ///
 /// #[async_trait]
-/// impl EventHandler<TransferEvent> for TransferHandler {
+/// impl EventHandler<MyEvent> for MyHandler {
 ///     async fn handle(
 ///         &self,
-///         event: TransferEvent,
-///         context: &solana_indexer_sdk::types::metadata::TxMetadata,
+///         event: MyEvent,
+///         context: &TxMetadata,
 ///         db: &PgPool,
 ///     ) -> Result<(), SolanaIndexerError> {
-///         let signature = &context.signature;
-///         println!("Processing transfer: {} -> {} ({})", event.from, event.to, event.amount);
-///         
-///         // Insert into database
-///         sqlx::query(
-///             "INSERT INTO transfers (signature, from_wallet, to_wallet, amount) VALUES ($1, $2, $3, $4)"
-///         )
-///         .bind(signature)
-///         .bind(&event.from)
-///         .bind(&event.to)
-///         .bind(event.amount as i64)
-///         .execute(db)
-///         .await?;
-///         
+///         println!("Handling event with amount: {} at slot: {}", event.amount, context.slot);
 ///         Ok(())
 ///     }
 /// }
@@ -304,6 +292,7 @@ pub trait EventHandler<T>: Send + Sync + 'static {
 ///
 /// This trait allows storing handlers of different event types in a single
 /// collection, enabling the handler registry to manage multiple handler types.
+#[doc(hidden)]
 #[async_trait]
 pub trait DynamicEventHandler: Send + Sync {
     /// Handles a dynamic event (discriminator + raw bytes).

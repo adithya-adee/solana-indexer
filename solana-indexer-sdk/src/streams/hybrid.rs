@@ -10,10 +10,10 @@ use async_trait::async_trait;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::sync::{Mutex, mpsc};
-use tokio::time::{Duration, interval};
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
+use tokio::time::{interval, Duration};
 
 /// Hybrid input source combining WebSocket and RPC.
 pub struct HybridSource {

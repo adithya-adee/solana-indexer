@@ -1,5 +1,5 @@
-use solana_indexer_sdk::SolanaIndexerConfigBuilder;
 use solana_indexer_sdk::config::{HeliusNetwork, SourceConfig};
+use solana_indexer_sdk::SolanaIndexerConfigBuilder;
 
 #[test]
 fn test_helius_config_mainnet() {

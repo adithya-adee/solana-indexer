@@ -12,7 +12,7 @@ use crate::{
         registry::DecoderRegistry,
     },
     storage::{Storage, StorageBackend},
-    streams::{TransactionSource, helius::HeliusSource, websocket::WebSocketSource},
+    streams::{helius::HeliusSource, websocket::WebSocketSource, TransactionSource},
     types::{
         metadata::{TokenBalanceInfo, TxMetadata},
         traits::{HandlerRegistry, SchemaInitializer},
@@ -26,7 +26,7 @@ use solana_sdk::signature::Signature;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-use tokio::time::{Duration, interval};
+use tokio::time::{interval, Duration};
 
 /// Main indexer that orchestrates the complete pipeline.
 ///
@@ -39,17 +39,23 @@ use tokio::time::{Duration, interval};
 /// ```no_run
 /// use solana_indexer_sdk::{SolanaIndexer, SolanaIndexerConfigBuilder};
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let config = SolanaIndexerConfigBuilder::new()
-///     .with_rpc("http://127.0.0.1:8899")
-///     .with_database("postgresql://localhost/mydb")
-///     .program_id("11111111111111111111111111111111")
-///     .build()?;
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = SolanaIndexerConfigBuilder::new()
+///         .with_rpc("https://api.mainnet-beta.solana.com")
+///         .with_database("postgresql://postgres:password@localhost/indexer")
+///         .program_id("675k1q2wE7s6L3R29fs6tcMbtFD4vT759Wcx3CY6CSLg")
+///         .build()?;
 ///
-/// let indexer = SolanaIndexer::new(config).await?;
-/// indexer.start().await?;
-/// # Ok(())
-/// # }
+///     let mut indexer = SolanaIndexer::new(config).await?;
+///
+///     // Register decoders and handlers
+///     // indexer.register_decoder("program_name", MyDecoder);
+///     // indexer.register_handler(MyHandler);
+///
+///     indexer.start().await?;
+///     Ok(())
+/// }
 /// ```
 pub struct SolanaIndexer {
     config: SolanaIndexerConfig,

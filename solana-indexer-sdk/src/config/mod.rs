@@ -309,17 +309,18 @@ impl Default for BackfillConfig {
 ///
 /// ```no_run
 /// use solana_indexer_sdk::SolanaIndexerConfigBuilder;
-/// use std::env;
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let config = SolanaIndexerConfigBuilder::new()
-///     .with_rpc(env::var("RPC_URL")?)
-///     .with_database(env::var("DATABASE_URL")?)
-///     .program_id(env::var("PROGRAM_ID")?)
-///     .with_poll_interval(10)
-///     .build()?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = SolanaIndexerConfigBuilder::new()
+///         .with_rpc("https://api.mainnet-beta.solana.com")
+///         .with_database("postgresql://postgres:password@localhost/indexer")
+///         .program_id("675k1q2wE7s6L3R29fs6tcMbtFD4vT759Wcx3CY6CSLg")
+///         .with_poll_interval(2)
+///         .with_batch_size(50)
+///         .build()?;
+///     Ok(())
+/// }
 /// ```
 #[derive(Debug, Default)]
 pub struct SolanaIndexerConfigBuilder {

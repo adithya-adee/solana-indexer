@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// Metrics and capacity tracking for a registry.
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct RegistryMetrics {
     /// Number of items currently registered.

@@ -1,7 +1,7 @@
 use serde_json::json;
 use solana_indexer_sdk::{DecoderRegistry, DynamicInstructionDecoder};
 use solana_transaction_status::{
-    UiInstruction, UiParsedInstruction, parse_instruction::ParsedInstruction,
+    parse_instruction::ParsedInstruction, UiInstruction, UiParsedInstruction,
 };
 
 struct MockDecoder {

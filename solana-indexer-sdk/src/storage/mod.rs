@@ -44,10 +44,17 @@ pub trait StorageBackend: Send + Sync {
 /// ```no_run
 /// use solana_indexer_sdk::Storage;
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let storage = Storage::new("postgresql://localhost/mydb").await?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let storage = Storage::new("postgresql://postgres:password@localhost/indexer").await?;
+///     storage.initialize().await?;
+///
+///     let is_processed = storage.is_processed("5j7s6NiJS3...").await?;
+///     if !is_processed {
+///         storage.mark_processed("5j7s6NiJS3...", 12345).await?;
+///     }
+///     Ok(())
+/// }
 /// ```
 pub struct Storage {
     /// `PostgreSQL` connection pool
@@ -647,6 +654,16 @@ mod tests {
 
         if let Ok(storage) = Storage::new(&db_url).await {
             storage.initialize().await.unwrap();
+
+            // Clear tables for a clean test state
+            sqlx::query("DELETE FROM _solana_indexer_sdk_tentative")
+                .execute(&storage.pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM _solana_indexer_sdk_processed")
+                .execute(&storage.pool)
+                .await
+                .unwrap();
 
             // Setup: Insert some tentative transactions
             let current_slot = 1000;

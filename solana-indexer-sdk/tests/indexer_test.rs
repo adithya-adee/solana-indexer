@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use solana_indexer_sdk::utils::error::Result;
 use solana_indexer_sdk::{SolanaIndexer, SolanaIndexerConfigBuilder, StorageBackend};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::sync::Arc;
 use std::sync::Mutex;
 use wiremock::matchers::{body_string_contains, method};

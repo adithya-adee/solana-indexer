@@ -1,5 +1,5 @@
-use solana_indexer_sdk::streams::TransactionSource;
 use solana_indexer_sdk::streams::hybrid::HybridSource;
+use solana_indexer_sdk::streams::TransactionSource;
 use solana_sdk::pubkey::Pubkey;
 
 #[tokio::test]
