@@ -1,670 +1,401 @@
-# Solana Indexer Architecture
+# Solana Indexer SDK — Architecture
 
-**Build Philosophy:** SolanaIndexer is designed as a developer-centric SDK for Solana data indexing. Our philosophy is to provide a highly extensible, reliable, and secure platform that prioritizes a seamless developer experience (DX) while offering a clear path from local development to production-grade deployments. We solve the "boring problems" (polling loops, RPC connections, signature fetching, idempotency) so developers can focus on their unique business logic.
+**Build Philosophy:** `solana-indexer-sdk` is a developer-centric, production-grade Rust SDK for Solana data indexing. Our philosophy is to provide a highly extensible, reliable, and performant platform that prioritizes a seamless developer experience (DX) while offering a clear path from local development to production-grade deployments. We solve the "boring problems" (polling loops, RPC connections, signature fetching, idempotency, reorg handling, backfill) so developers can focus on their unique business logic.
+
+---
 
 ## 1. Core System Architecture: Flexible Event-Driven Pipeline
 
-SolanaIndexer operates on a flexible event-driven pipeline model with **two key extension points** for developers:
+SolanaIndexer operates on a flexible event-driven pipeline model with **three key extension points** for developers:
 
 1. **`InstructionDecoder<T>`**: Custom instruction parsing (raw bytes → typed events)
-2. **`EventHandler<T>`**: Custom event processing (typed events → business logic)
+2. **`LogDecoder<T>`**: Custom log parsing (program logs → typed events)
+3. **`EventHandler<T>`**: Custom event processing (typed events → business logic)
 
-This separation of concerns allows developers to build indexers for any use case—from general SPL token transfers to complex custom program logic—while the SDK handles all infrastructure concerns.
+This separation of concerns allows developers to build indexers for any use case — from general SPL token transfers to complex custom program logic like Jupiter swaps and Raydium AMM pools — while the SDK handles all infrastructure concerns.
 
 ### Data Flow Overview
 
-The core pipeline consists of the following stages:
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                      Input Sources                               │
+│  ┌──────────┐   ┌──────────────┐   ┌──────────────────────────┐ │
+│  │  Poller  │   │  WebSocket   │   │  Hybrid (WS + Poller)    │ │
+│  │  (RPC)   │   │  Subscriber  │   │  Gap-filling backstop    │ │
+│  └────┬─────┘   └──────┬───────┘   └───────────┬──────────────┘ │
+│       │                │                        │                │
+└───────┴────────────────┴────────────────────────┘                │
+                         │                                          
+                         ▼                                          
+              ┌──────────────────────┐                              
+              │   Parallel Fetcher   │  (Concurrent tx retrieval)   
+              │   + Backfill Engine  │  (Historical data indexing)  
+              └──────────┬───────────┘                              
+                         │                                          
+                         ▼                                          
+              ┌──────────────────────┐                              
+              │  Idempotency Check   │  (_processed / _tentative)   
+              └──────────┬───────────┘                              
+                         │                                          
+              ┌──────────┴───────────┐                              
+              │                      │                              
+              ▼                      ▼                              
+  ┌───────────────────┐  ┌───────────────────┐                     
+  │ Decoder Registry  │  │ Log Decoder Reg.  │                     
+  │ (Instructions)    │  │ (Program Logs)    │                     
+  └─────────┬─────────┘  └─────────┬─────────┘                     
+            │                      │                                
+            └──────────┬───────────┘                                
+                       ▼                                            
+            ┌──────────────────────┐                                
+            │  Handler Registry    │  (Business logic dispatch)     
+            └──────────┬───────────┘                                
+                       │                                            
+                       ▼                                            
+            ┌──────────────────────┐                                
+            │  Confirmation &      │                                
+            │  Persistence         │                                
+            └──────────────────────┘                                
+```
 
-1.  **Input Source (Poller / Subscriber):** Responsible for acquiring raw transaction data.
-    *   **Poller:** Periodically queries Solana RPC endpoints for new transaction signatures (e.g., `getSignaturesForAddress`). Ideal for localnet and lower-throughput scenarios.
-    *   **Subscriber:** Listens for real-time transaction events via WebSocket connections (e.g., `programSubscribe`). Essential for high-throughput, low-latency production environments.
-    *   **Hybrid (Dual-Stream):** Combines the low latency of WebSockets with the reliability of periodic RPC polling. It uses WebSockets for real-time events and a background poller to detect and fill any gaps (e.g., dropped packets).
-2.  **Fetcher:** For each identified new transaction signature, it retrieves the full transaction details (e.g., `getTransaction`). This includes instruction data, logs, and metadata.
-3.  **Idempotency Tracker:** Before processing, checks a persistent store (`_solana_indexer_processed` table) to prevent re-processing already handled transactions. This ensures data consistency and reliability.
-4.  **Decoder Registry (Developer Extension Point #1):** Routes instructions to registered `InstructionDecoder<T>` implementations.
-    *   Developers implement `InstructionDecoder<T>` to parse raw instruction data into strongly-typed event structs.
-    *   Multiple decoders can be registered for different program IDs, enabling multi-program indexing.
-    *   Decoders can use IDL-generated types (via proc macros) or custom parsing logic.
-    *   Returns `Option<T>` where `T` is the typed event struct.
-5.  **Handler Registry (Developer Extension Point #2):** Dispatches decoded events to registered `EventHandler<T>` implementations.
-    *   Developers implement `EventHandler<T>` to define custom business logic for processing events.
-    *   Typical operations include database inserts, updates, external API calls, or triggering further processing.
-    *   Handlers receive enriched context via `TxMetadata` (slot, block time, fee, balances), enabling complex logic without extra RPC calls.
-    *   Handlers can define custom database schemas via the `initialize_schema()` method.
-6.  **Confirmation & Persistence:** Marks the transaction signature as processed in the idempotency tracker.
+### Pipeline Stages
 
-### Architecture Flow Diagram
+1. **Input Source (Poller / Subscriber / Hybrid):** Acquires transaction signatures.
+   - **Poller:** Periodically queries Solana RPC for new transaction signatures. Ideal for localnet and moderate throughput.
+   - **WebSocket Subscriber:** Real-time notifications via `programSubscribe`. Essential for low-latency production environments.
+   - **Hybrid (Dual-Stream):** Combines WebSocket speed with RPC polling reliability. Uses WS for real-time events and a background poller for gap-filling.
+   - **Helius Enhanced RPC:** Integration with Helius RPC endpoints for enhanced reliability, historical data, and optimized polling.
+2. **Parallel Fetcher:** Retrieves full transaction details concurrently using a bounded worker pool (`tokio::spawn` + semaphore).
+3. **Backfill Engine:** Manages historical data indexing with configurable depth, batch sizes, and slot-based tracking.
+4. **Idempotency Tracker:** Checks `_solana_indexer_sdk_processed` and `_solana_indexer_sdk_tentative` tables to prevent re-processing.
+5. **Decoder Registry (Extension Point #1):** Routes instructions to registered `InstructionDecoder<T>` implementations.
+6. **Log Decoder Registry (Extension Point #2):** Routes program logs to registered `LogDecoder<T>` implementations.
+7. **Handler Registry (Extension Point #3):** Dispatches decoded events to registered `EventHandler<T>` implementations.
+8. **Confirmation & Persistence:** Marks the transaction as processed in the idempotency tracker.
 
-See `docs/architecture_diagram.mermaid` for a visual representation of the architecture.
+**Key Insight:** Developers only implement the extension points. The SDK handles everything else.
 
-The core pipeline consists of:
-
-1.  **Input Source (Poller / Subscriber):** Acquires transaction signatures.
-2.  **Parallel Transaction Fetcher:** Retrieves full transaction details concurrently using a worker pool.
-3.  **Backfill Engine:** Manages historical data indexing with reorg handling.
-4.  **Idempotency Tracker:** Prevents duplicate processing.
-5.  **Bounded Registries:** Routes data to decoders and handlers with memory safeguards.
-6.  **Confirmation & Persistence:** Marks transactions as processed.
-
-**Key Insight:** Developers only implement the two extension points (`InstructionDecoder<T>` and `EventHandler<T>`). The SDK handles everything else.
+---
 
 ## 2. Configuration Management
 
-SolanaIndexer provides a flexible configuration system, blending ease-of-use with programmatic control, crucial for both local development and production deployments.
-
 ### `SolanaIndexerConfig` and Builder Pattern
 
-Configuration is managed via a `SolanaIndexerConfig` struct, built using a fluent builder pattern. This approach offers:
-*   **Type Safety:** All configuration parameters are strongly typed.
-*   **Discoverability:** IDE auto-completion guides developers through available options.
-*   **Flexibility:** Easily integrate configuration from various sources (environment variables, files, hardcoded defaults).
+Configuration is managed via a `SolanaIndexerConfig` struct, built using a fluent builder pattern:
 
-**Example:**
 ```rust
-SolanaIndexerConfigBuilder::new()
-    .with_rpc("http://127.0.0.1:8899") // or .with_ws("ws://...", "http://...")
-    .with_database(env::var("DATABASE_URL")?)
-    .program_id(env::var("PROGRAM_ID")?)
+let config = SolanaIndexerConfigBuilder::new()
+    .with_rpc("http://127.0.0.1:8899")       // or .with_ws() or .with_hybrid()
+    .with_database(&env::var("DATABASE_URL")?)
+    .program_id(&env::var("PROGRAM_ID")?)
+    .with_batch_size(50)
+    .with_poll_interval(5)
+    .with_backfill(BackfillConfig {
+        enabled: true,
+        max_depth: 1000,
+        batch_size: 100,
+    })
     .build()?;
 
 let indexer = SolanaIndexer::new(config).await?;
 indexer.start().await?;
 ```
 
-### Environment Variable Integration
+**Features:**
+- **Type Safety:** All configuration parameters are strongly typed.
+- **Discoverability:** IDE auto-completion guides developers through available options.
+- **Environment Variable Integration:** Seamlessly integrates with `std::env::var` and `.env` files.
+- **Helius Support:** `.with_helius(api_key, network)` for Helius-enhanced RPC.
 
-For convenience, especially in local development, SolanaIndexer seamlessly integrates with environment variables:
-*   **Automatic `env::var` Lookup:** Configuration methods (e.g., `.with_database()`) can directly consume values from `std::env::var`.
-*   **`.env` File Support:** Developers can use popular crates like `dotenv` to load variables from a `.env` file into the environment. SolanaIndexer expects these to be loaded *before* its configuration methods are called.
-
-**Best Practice:** Always `.gitignore` your `.env` files to prevent sensitive information from being committed to version control. For production, rely on explicit environment variables or secrets management systems rather than `.env` files.
+---
 
 ## 3. Indexer Types and Selection
 
-SolanaIndexer supports multiple indexing strategies, allowing developers to select the best fit for their use case and performance requirements.
+| Mode | Method | Use Case | Activation |
+|:---|:---|:---|:---|
+| **RPC Polling** | Periodic `getSignaturesForAddress` | Local dev, moderate throughput | `.with_rpc(...)` |
+| **WebSocket** | Real-time `programSubscribe` | Low-latency production | `.with_ws(...)` |
+| **Hybrid** | WS + background RPC gap-filling | Production (speed + completeness) | `.with_hybrid(...)` |
+| **Helius Enhanced** | Helius RPC APIs | Enhanced reliability + historical data | `.with_helius(...)` |
 
-*   **Program-Specific Polling (Default via `with_rpc`):**
-    *   **Mechanism:** Periodically queries an RPC node for transactions related to a specific `PROGRAM_ID`.
-    *   **Use Case:** Ideal for local development, testing, and applications with moderate throughput requirements on a single program.
-    *   **Activation:** Configured via `.with_rpc(...)`.
+---
 
-*   **Program-Specific WebSocket Subscriptions (Real-time via `with_ws`):**
-    *   **Mechanism:** Maintains a persistent WebSocket connection to an RPC node, receiving real-time notifications for transactions involving a specific `PROGRAM_ID`.
-    *   **Use Case:** Critical for high-throughput, low-latency production applications requiring immediate data processing.
-    *   **Use Case:** Critical for high-throughput, low-latency production applications requiring immediate data processing.
-    *   **Activation:** Configured via `.with_ws(...)`.
+## 4. IDL Processing & Type Generation
 
-*   **Hybrid Dual-Stream (Recommended for Production via `with_hybrid`):**
-    *   **Mechanism:** Runs a `WebSocketSource` for real-time data AND a background `RpcPoller` that periodically checks for "gaps" (missed slots/signatures).
-    *   **Use Case:** Production environments where both speed (WS) and 100% data completeness (RPC backstop) are required.
-    *   **Activation:** Configured via `.with_hybrid(...)`.
+- **IDL-Driven Development:** Place `idl.json` files in the `idl/` directory.
+- **Procedural Macro Compilation:** During `cargo build`, a proc macro generates:
+  - Rust `struct` definitions for accounts and events.
+  - `BorshDeserialize` trait implementations.
+  - Event discriminator constants.
+- **General Indexing Without IDL:** The SDK can parse common instruction types (e.g., SPL Token transfers) by directly parsing known byte layouts.
 
-*   **General/Multi-Program Indexing (Production Roadmap):**
-    *   **Mechanism:** Capabilities to index events or instructions from multiple programs, or to process broad categories of on-chain activity (e.g., all SPL token transfers) without being tied to a single `PROGRAM_ID`. This often involves integrating with specialized data providers (e.g., Helius, Blockdaemon).
-    *   **Use Case:** Building comprehensive blockchain analytics, cross-program interactions, or aggregated data services.
-
-## 4. IDL Processing & Type Generation (Developer Experience Highlight)
-
-A cornerstone of SolanaIndexer's DX is its ability to transform Solana program IDLs into strongly-typed Rust code.
-
-*   **IDL-Driven Development:** Developers place their Solana program's `idl.json` file(s) in a designated `idl/` directory within their project.
-*   **Procedural Macro Compilation:** During `cargo build`, a SolanaIndexer procedural macro reads and parses these `idl.json` files.
-*   **Automatic Code Generation:** The macro automatically generates:
-    *   Rust `struct` definitions for all defined accounts and **emitted events**.
-    *   Necessary traits (e.g., `AnchorDeserialize`, `BorshDeserialize`) for deserializing raw on-chain data into these generated types.
-    *   An example generated type: `use solana_indexer::generated::TransferEvent;`.
-*   **Type Safety and Reduced Boilerplate:** This generation eliminates manual struct definition and deserialization logic, providing compile-time type checking and significantly reducing development effort and potential errors.
-*   **Event Discriminators:** The SDK's `Decoder` uses unique 8-byte discriminators (automatically derived or specified in the IDL) to identify and correctly deserialize emitted events from transaction logs into their corresponding generated Rust types.
-
-### General Indexing Without IDL
-
-For scenarios where a specific program IDL isn't available or desired (e.g., indexing generic SPL Token transfers), SolanaIndexer's `Decoder` can also interpret common instruction types by directly parsing their known byte layouts. This provides flexibility but requires the SDK to maintain knowledge of these specific instruction formats.
+---
 
 ## 5. Performance & Reliability
 
-### Parallel Fetch Pipeline
+### Benchmark Results (v0.1.0 Baseline)
 
-To handle high throughput, the indexer employs a parallel fetch pipeline:
-*   **Worker Pool:** A configurable number of worker threads (`worker_threads`) process transactions concurrently.
-*   **Semaphore Bounding:** Concurrency is limited by a semaphore to prevent overwhelming the RPC provider or local resources.
-*   **Non-Blocking:** The processing loop spawns tasks (`tokio::spawn`) effectively utilizing multicore systems.
+| Component | Metric | Value | Throughput |
+|:---|:---|:---|:---|
+| **Decoder** | Single Instruction | `62 ns` | **~16M ops/sec** |
+| **Decoder** | Batch (100 instr) | `6.4 µs` | **~157K batches/sec** |
+| **Storage** | Write (`mark_processed`) | `2.8 ms` | ~357 ops/sec |
+| **Storage** | Read (`is_processed`) | `92 µs` | ~10.8K ops/sec |
+| **Pipeline** | End-to-End (50 tx batch) | `101 ms` | **~494 TPS** |
+
+Benchmarks use the `criterion` library for statistical rigor. Run with:
+```bash
+cargo bench
+# View report: target/criterion/report/index.html
+```
+
+### Parallel Fetch Pipeline
+- **Worker Pool:** Configurable concurrent workers via `tokio::spawn`.
+- **Semaphore Bounding:** Prevents overwhelming RPC providers.
+- **Non-Blocking:** Fully async/await architecture.
 
 ### Reorg Detection & Finality Management
+- **Commitment Levels:** Configurable (`Processed`, `Confirmed`, `Finalized`).
+- **Tentative Transaction Tracking:** Transactions initially stored in `_solana_indexer_sdk_tentative`.
+- **FinalityMonitor:** Background task that:
+  - Fetches latest finalized slot.
+  - Compares block hashes for tentative transactions.
+  - Detects reorgs and invokes `on_rollback()` handlers.
+  - Promotes confirmed transactions to finalized status.
+- **Graceful Shutdown:** Supports cancellation tokens for clean teardown.
 
-SolanaIndexer implements robust blockchain reorganization (reorg) detection and finality tracking to ensure data integrity:
+### Backfill Engine
+- **Historical Indexing:** Automatically backfills missed transactions.
+- **Configurable Depth:** Control how far back to search.
+- **Slot-Based Tracking:** Efficient batch processing by slot ranges.
 
-*   **Commitment Levels:** Configurable commitment levels (`Processed`, `Confirmed`, `Finalized`) allow developers to choose the appropriate trade-off between latency and finality guarantees.
-*   **Tentative Transaction Tracking:** Transactions are initially marked as "tentative" in the database until they reach finalized status.
-*   **FinalityMonitor Background Task:** A dedicated background task periodically:
-    *   Fetches the latest finalized slot from the RPC
-    *   Compares block hashes of tentative slots with their finalized counterparts
-    *   Detects reorgs when hashes don't match
-    *   Promotes matching transactions from tentative to finalized status
-*   **Automatic Rollback Handling:** When a reorg is detected:
-    *   Affected transactions are identified
-    *   Registered handlers' `on_rollback()` methods are invoked
-    *   Orphaned data is cleaned up from storage
-*   **Configurable Monitoring:** The finality monitor runs every 10 seconds by default and supports graceful shutdown via cancellation tokens.
+---
 
 ## 6. Extensibility: Developer Extension Points
 
-SolanaIndexer provides two primary extension points that enable developers to inject custom logic cleanly and efficiently:
-
-### Extension Point #1: `InstructionDecoder<T>` (Custom Instruction Parsing)
-
-The `InstructionDecoder<T>` trait allows developers to define how raw Solana instructions are parsed into typed event structures.
+### Extension Point #1: `InstructionDecoder<T>`
 
 ```rust
-/// Generic instruction decoder trait for custom parsing logic.
-///
-/// Developers implement this trait to define how raw Solana instructions
-/// are parsed into typed event structures.
 pub trait InstructionDecoder<T>: Send + Sync {
-    /// Decodes a Solana instruction into a typed event.
-    ///
-    /// # Arguments
-    /// * `instruction` - The UI instruction from the transaction
-    ///
-    /// # Returns
-    /// * `Some(T)` - Successfully decoded event
-    /// * `None` - Instruction doesn't match or failed to decode
     fn decode(&self, instruction: &UiInstruction) -> Option<T>;
 }
 ```
 
-**Key Features:**
-- **Generic over Event Type `T`**: Developers can implement decoders for any event struct they define
-- **Flexible Parsing**: Can use IDL-generated types, Anchor deserialization, or custom byte parsing
-- **Multi-Program Support**: Register different decoders for different program IDs
-- **Type Safety**: Returns `Option<T>` ensuring compile-time correctness
+### Extension Point #2: `LogDecoder<T>` (Log-Based Indexing)
 
-**Example: SPL Token Transfer Decoder**
 ```rust
-pub struct SplTransferDecoder;
-
-impl InstructionDecoder<TransferEvent> for SplTransferDecoder {
-    fn decode(&self, instruction: &UiInstruction) -> Option<TransferEvent> {
-        // 1. Check if instruction is for SPL Token program
-        // 2. Parse instruction data to identify transfer type
-        // 3. Extract accounts and amounts
-        // 4. Return TransferEvent if successful
-        
-        match instruction {
-            UiInstruction::Parsed(parsed) => {
-                if parsed.program == "spl-token" && parsed.parsed["type"] == "transfer" {
-                    Some(TransferEvent {
-                        from: parse_pubkey(&parsed.parsed["info"]["source"]),
-                        to: parse_pubkey(&parsed.parsed["info"]["destination"]),
-                        amount: parsed.parsed["info"]["amount"].as_u64()?,
-                        mint: parse_pubkey(&parsed.parsed["info"]["mint"]),
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
+pub trait LogDecoder<T>: Send + Sync {
+    fn decode_log(&self, log_line: &str) -> Option<T>;
 }
 ```
 
-**Example: Custom Program Decoder with IDL**
-```rust
-// Using IDL-generated types
-pub struct MyProgramDecoder;
-
-impl InstructionDecoder<DepositEvent> for MyProgramDecoder {
-    fn decode(&self, instruction: &UiInstruction) -> Option<DepositEvent> {
-        // Use anchor_lang to deserialize instruction data
-        let data = instruction.data()?;
-        
-        // Check instruction discriminator (first 8 bytes)
-        if &data[..8] == DEPOSIT_DISCRIMINATOR {
-            // Deserialize using Borsh
-            DepositEvent::try_from_slice(&data[8..]).ok()
-        } else {
-            None
-        }
-    }
-}
-```
-
-**Registration:**
-```rust
-SolanaIndexer::new()
-    .register_decoder(SPL_TOKEN_PROGRAM_ID, Box::new(SplTransferDecoder))
-    .register_decoder(MY_PROGRAM_ID, Box::new(MyProgramDecoder))
-    // ... rest of configuration
-```
-
-### Extension Point #2: `EventHandler<T>` (Custom Event Processing)
-
-The `EventHandler<T>` trait is where developers define their business logic for processing decoded events.
+### Extension Point #3: `EventHandler<T>`
 
 ```rust
 #[async_trait]
 pub trait EventHandler<T>: Send + Sync + 'static {
-    /// Initializes custom database schema for this handler.
-    ///
-    /// Override this method to create custom tables. Called once
-    /// during indexer startup.
-    ///
-    /// # Default Implementation
-    /// Does nothing (no-op).
-    async fn initialize_schema(&self, _db: &PgPool) -> Result<()> {
-        Ok(())
-    }
-
-    /// Handles a decoded event.
-    ///
-    /// # Arguments
-    /// * `event` - The typed event to process
-    /// * `db` - Database connection pool
-    /// * `signature` - Transaction signature for tracking
+    async fn initialize_schema(&self, _db: &PgPool) -> Result<()> { Ok(()) }
     async fn handle(&self, event: T, context: &TxMetadata, db: &PgPool) -> Result<()>;
-
-    /// Handles transaction rollback due to blockchain reorganization.
-    ///
-    /// This method is called when a previously processed transaction is
-    /// orphaned due to a reorg. Implement this to define compensating logic
-    /// (e.g., deleting or marking affected database records).
-    ///
-    /// # Default Implementation
-    /// Does nothing (no-op) for backward compatibility.
-    ///
-    /// # Arguments
-    /// * `context` - Metadata of the rolled-back transaction
-    /// * `db` - Database connection pool
-    async fn on_rollback(&self, _context: &TxMetadata, _db: &PgPool) -> Result<()> {
-        Ok(())
-    }
+    async fn on_rollback(&self, _context: &TxMetadata, _db: &PgPool) -> Result<()> { Ok(()) }
 }
-```
-
-**Key Features:**
-- **Generic over Event Type `T`**: Type-safe handling of specific event structures
-- **Schema Initialization**: Optional `initialize_schema()` method for custom database setup
-- **Async Processing**: Full async/await support for database operations and API calls
-- **Database Access**: Provided `PgPool` for persistence operations
-- **Transaction Context**: Access to transaction signature for logging and tracking
-
-**Example: Transfer Event Handler**
-```rust
-pub struct TransferHandler;
-
-#[async_trait]
-impl EventHandler<TransferEvent> for TransferHandler {
-    /// Create the transfers table on startup
-    async fn initialize_schema(&self, db: &PgPool) -> Result<()> {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS spl_transfers (
-                signature TEXT PRIMARY KEY,
-                from_wallet TEXT NOT NULL,
-                to_wallet TEXT NOT NULL,
-                amount BIGINT NOT NULL,
-                mint TEXT NOT NULL,
-                indexed_at TIMESTAMPTZ DEFAULT NOW()
-            )"
-        )
-        .execute(db)
-        .await?;
-        
-        Ok(())
-    }
-
-    /// Process each transfer event
-    async fn handle(
-        &self,
-        event: TransferEvent,
-        context: &TxMetadata,
-        db: &PgPool,
-    ) -> Result<()> {
-        println!(
-            "Processing Transfer at slot {}: {} -> {} ({} tokens)",
-            context.slot, event.from, event.to, event.amount
-        );
-
-        sqlx::query!(
-            "INSERT INTO spl_transfers (signature, from_wallet, to_wallet, amount, mint, slot)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (signature) DO NOTHING",
-            context.signature,
-            event.from.to_string(),
-            event.to.to_string(),
-            event.amount as i64,
-            event.mint.to_string(),
-            context.slot as i64
-        )
-        .execute(db)
-        .await?;
-
-        Ok(())
-    }
-
-    /// Handle rollback by deleting the orphaned transfer record
-    async fn on_rollback(&self, context: &TxMetadata, db: &PgPool) -> Result<()> {
-        println!("Rolling back transfer at slot {}: {}", context.slot, context.signature);
-        
-        sqlx::query!("DELETE FROM spl_transfers WHERE signature = $1", context.signature)
-            .execute(db)
-            .await?;
-        
-        Ok(())
-    }
-}
-```
-
-**Registration:**
-```rust
-SolanaIndexer::new()
-    .register_handler::<TransferEvent>(TransferHandler)
-    .register_handler::<DepositEvent>(DepositHandler)
-    // ... rest of configuration
 ```
 
 ### How They Work Together
 
 ```
-Transaction → InstructionDecoder<T> → Option<T> → EventHandler<T> → Database/API
-              (Developer defines      (Typed     (Developer defines
-               parsing logic)          Event)     business logic)
+Transaction → InstructionDecoder<T> → Option<T> ─┐
+                                                   ├→ EventHandler<T> → Database/API
+Program Logs → LogDecoder<T> → Option<T> ─────────┘
 ```
 
-1.  **SDK fetches transaction** from Solana network
-2.  **Decoder Registry routes** instructions to appropriate `InstructionDecoder<T>`
-3.  **Developer's decoder** parses raw bytes into typed event `T`
-4.  **Handler Registry dispatches** event to appropriate `EventHandler<T>`
-5.  **Developer's handler** processes event (database writes, API calls, etc.)
-6.  **SDK marks transaction** as processed in idempotency tracker
-
-This separation allows developers to:
-- **Reuse decoders** across multiple handlers
-- **Test parsing logic** independently from business logic
-- **Mix and match** different decoders and handlers
-- **Support multiple programs** in a single indexer instance
+---
 
 ## 7. Reliability & Error Handling
 
-Reliability is paramount for an indexing solution. SolanaIndexer implements robust mechanisms to ensure data integrity and system stability.
+- **Idempotency:** `_solana_indexer_sdk_processed` table prevents duplicate processing.
+- **Structured Errors:** `SolanaIndexerError` enum with `thiserror` provides clear, actionable errors:
+  - `DatabaseError`, `DecodingError`, `RpcError`, `ConfigError`, `WebSocketError`
+- **Contextual Logging:** Built-in structured logging via `tracing` crate.
+- **Graceful Shutdown:** All async tasks honor cancellation tokens.
+- **Database Transactions:** Handlers can wrap operations in DB transactions for atomicity.
 
-*   **Idempotency:** The `_solana_indexer_processed` table (managed by the `Tracker`) guarantees that each unique transaction is processed only once, preventing duplicate entries or side effects even if the indexer restarts or encounters temporary failures.
-*   **Structured `SolanaIndexerError`:**
-    SolanaIndexer defines a custom error enumeration, `SolanaIndexerError`, to provide clear, actionable error reporting throughout the SDK. This error type implements `std::error::Error` and `std::fmt::Display`, allowing for seamless integration with Rust's error handling ecosystem and easy human-readable output. For professional Rust libraries, the `thiserror` crate is a highly recommended tool for defining custom error types with rich context and automatic `From` conversions.
-
-    ```rust
-    // Assuming 'thiserror' is a dependency in your Cargo.toml
-    use thiserror::Error;
-
-    /// Custom error type for SolanaIndexer operations.
-    #[derive(Debug, Error)]
-    pub enum SolanaIndexerError {
-        /// Errors encountered during database operations.
-        #[error("Database error: {0}")]
-        DatabaseError(#[from] sqlx::Error),
-        /// Errors during transaction data or event decoding.
-        #[error("Decoding error: {0}")]
-        DecodingError(String),
-        /// Errors interacting with the Solana RPC.
-        #[error("RPC error: {0}")]
-        RpcError(String),
-        /// Errors related to configuration, e.g., missing environment variables.
-        #[error("Configuration error: {0}")]
-        ConfigError(#[from] std::env::VarError),
-        // Add more specific error types as the SDK evolves.
-    }
-    ```
-*   **Contextual Errors:** When errors occur, SolanaIndexer aims to provide rich contextual information, including the specific operation, input data, and any underlying causes. This significantly aids in debugging and issue resolution, enabling developers to quickly pinpoint and address issues.
-*   **Explicit Error Propagation:** All errors propagate up the call stack, ensuring no silent failures. Developers are guided to handle errors appropriately, either by logging, retrying, or gracefully exiting.
-*   **Logging:** Detailed logging (e.g., using `tracing` crate) is integrated throughout the SDK to provide visibility into the pipeline's operation, aiding in diagnostics and monitoring.
-*   **Retry Logic (Production Roadmap):** For transient failures (e.g., RPC timeouts, temporary network glitches), a production-ready SolanaIndexer will implement configurable retry mechanisms with exponential backoff. This ensures resilience against intermittent issues without requiring constant developer intervention.
-*   **Dead-Letter Queues (Production Roadmap):** For events that consistently fail processing after all retries (e.g., due to malformed data or unrecoverable application errors), a dead-letter queue mechanism will be introduced. This prevents such problematic events from blocking the main processing pipeline and allows for manual inspection and reprocessing.
-*   **Database Transactions:** For handlers performing multiple database operations, developers are strongly encouraged to wrap their logic in database transactions to ensure atomicity (all or nothing) and data consistency.
+---
 
 ## 8. Security Considerations
 
-Security is built into SolanaIndexer's design, protecting both the indexed data and the developer's application.
+- **No Hardcoded Secrets:** Environment variable-driven configuration.
+- **Input Validation:** IDL-driven decoding provides implicit validation.
+- **SQL Injection Prevention:** `sqlx` with parameterized queries throughout.
+- **Minimal Privileges:** Designed for least-privilege operation.
+- **Open Source Auditability:** Full codebase transparency.
 
-*   **No Hardcoded Secrets:** Configuration encourages the use of environment variables, preventing sensitive information (database credentials, API keys) from being hardcoded or committed to version control.
-*   **Input Validation (Implicit):** IDL-driven decoding inherently provides a form of input validation. Data not conforming to the defined IDL structs will fail deserialization, preventing malformed on-chain data from being incorrectly processed.
-*   **Safe Database Interactions:** By promoting `sqlx` and parameterized queries, SolanaIndexer guides developers towards preventing common database vulnerabilities like SQL injection.
-*   **Minimal Privileges:** Encourage running the indexer with the minimum necessary permissions for both network and database access.
-*   **Open Source Auditability:** As an open-source SDK, the codebase is transparent and auditable by the community, fostering trust and allowing for early detection of potential vulnerabilities.
+---
 
 ## 9. Directory Structure
 
+```
 solana-indexer/
-├── Cargo.toml
-├── idl/
-│   └── your_program.json          // Developer drops IDL here (e.g., from Anchor)
-├── src/
-│   ├── lib.rs                     // Public API and main entry point
-│   ├── config/                    // Configuration management
-│   │   └── mod.rs
-│   ├── core/                      // Core business logic
-│   │   ├── mod.rs
-│   │   ├── indexer.rs             // Main orchestrator logic
-│   │   ├── fetcher.rs             // Transaction fetching logic
-│   │   ├── reorg.rs               // Finality monitoring and reorg detection
-│   │   ├── decoder.rs             // IDL-driven and generic data parsing
-│   │   └── registry.rs            // Decoder registry
-│   ├── streams/                   // Data ingestion streams
-│   │   ├── mod.rs
-│   │   ├── poller.rs              // HTTP Polling implementation
-│   │   └── websocket.rs           // WebSocket implementation
-│   ├── storage/                   // Persistent storage and idempotency
-│   │   └── mod.rs
-│   ├── types/                     // Domain types and traits
-│   │   ├── mod.rs
-│   │   ├── events.rs              // Event structures
-│   │   └── traits.rs              // EventHandler and SchemaInitializer traits
-│   ├── utils/                     // Shared utilities
-│   │   ├── mod.rs
-│   │   ├── error.rs               // SolanaIndexerError enum
-│   │   ├── logging.rs             // Structured logging
-│   │   └── macros.rs              // Procedural macro for IDL compilation
-│   └── generator/                 // Transaction generator for testing
-└── examples/
-    └── token_transfer_indexer.rs  // Demo implementation of an EventHandler
+├── Cargo.toml                          # Workspace definition
+├── docs/
+│   └── ARCHITECTURE.md                 # This file
+│
+├── solana-indexer-sdk/                  # Core SDK crate
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs                      # Public API and re-exports
+│   │   ├── config/
+│   │   │   └── mod.rs                  # SolanaIndexerConfig + Builder
+│   │   ├── core/
+│   │   │   ├── indexer.rs              # Main orchestrator (start, process_*)
+│   │   │   ├── fetcher.rs              # Parallel transaction fetching
+│   │   │   ├── decoder.rs              # IDL-driven + generic data parsing
+│   │   │   ├── registry.rs             # Decoder registry
+│   │   │   ├── registry_metrics.rs     # Registry performance metrics
+│   │   │   ├── log_registry.rs         # Log decoder registry
+│   │   │   ├── account_registry.rs     # Account decoder registry
+│   │   │   ├── backfill.rs             # Historical backfill engine
+│   │   │   ├── backfill_defaults.rs    # Backfill default configurations
+│   │   │   └── reorg.rs               # Finality monitoring & reorg detection
+│   │   ├── streams/
+│   │   │   ├── poller.rs               # RPC polling implementation
+│   │   │   ├── websocket.rs            # WebSocket subscription
+│   │   │   ├── hybrid.rs              # Dual-stream (WS + RPC)
+│   │   │   └── helius.rs              # Helius-enhanced RPC
+│   │   ├── storage/
+│   │   │   └── mod.rs                  # PostgreSQL persistence + idempotency
+│   │   ├── types/
+│   │   │   ├── events.rs               # Event structures + discriminators
+│   │   │   └── traits.rs              # EventHandler, InstructionDecoder, etc.
+│   │   └── utils/
+│   │       ├── error.rs                # SolanaIndexerError enum
+│   │       ├── logging.rs              # Structured logging
+│   │       └── macros.rs              # Procedural macro for IDL compilation
+│   └── tests/                          # Integration tests
+│       ├── handler_integration_test.rs
+│       ├── multi_program_test.rs
+│       └── rpc_integration_test.rs
+│
+├── benches/                            # Performance benchmarks (criterion)
+│   ├── Cargo.toml
+│   ├── BENCHMARK_HISTORY.md
+│   ├── decoder_bench.rs                # Decoder throughput
+│   ├── storage_bench.rs                # Database read/write latency
+│   └── throughput_bench.rs             # End-to-end pipeline throughput
+│
+└── examples/                           # Ready-to-run examples
+    ├── rpc_system_transfer.rs          # RPC-based System Transfer indexer
+    ├── rpc_spl_token.rs                # RPC-based SPL Token indexer
+    ├── ws_system_transfer.rs           # WebSocket-based indexer
+    ├── helius_system_transfer.rs       # Helius-enhanced indexer
+    ├── jupiter_swap_indexer.rs         # Jupiter DEX swap tracking
+    ├── raydium_indexer.rs              # Raydium AMM indexer
+    ├── multi_program_indexer.rs        # Multi-program indexing
+    ├── account_indexer.rs              # Account state indexing
+    ├── backfill_indexer.rs             # Historical backfill
+    ├── verify_shutdown.rs              # Graceful shutdown verification
+    └── generator_spl_transfer.rs       # Test transaction generator
+```
 
-### Build Flow:
-1.  **Define Program:** Developer writes their Solana program (e.g., using Anchor) and generates its `idl.json`.
-2.  **Integrate IDL:** Developer places `idl/your_program.json` into their SolanaIndexer project.
-3.  **Generate Types:** Runs `cargo build` → Proc-macro generates structs
-4.  **Import Generated Types:** Developer imports generated types: `use solana_indexer::generated::TransferEvent;`
-5.  **Implement Handler:** Implements `EventHandler<TransferEvent>` trait
-6.  **Configure & Run:** Configures SolanaIndexer using the builder pattern and runs the indexer with `cargo run`
+---
 
 ## 10. Developer Quickstart
 
-### Step 1: Setup Configuration
-
-```bash
-# .env file (for local development, add to .gitignore)
-DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
-RPC_URL=http://127.0.0.1:8899
-PROGRAM_ID=YourProgramPublicKey111111111111111111111
+### Step 1: Add Dependency
+```toml
+[dependencies]
+solana-indexer-sdk = "0.1"
 ```
 
-For production, these should be explicit environment variables.
-
-### Step 2: Define Your Event Structure
+### Step 2: Define Event + Decoder + Handler
 
 ```rust
-use borsh::{BorshSerialize, BorshDeserialize};
-use solana_indexer::{EventDiscriminator, calculate_discriminator};
+use solana_indexer_sdk::*;
 
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+#[derive(Debug, Clone)]
 pub struct TransferEvent {
     pub from: String,
     pub to: String,
     pub amount: u64,
 }
 
-impl EventDiscriminator for TransferEvent {
-    fn discriminator() -> [u8; 8] {
-        calculate_discriminator("TransferEvent")
-    }
-}
-```
-
-### Step 3: Implement Your InstructionDecoder
-
-```rust
-use solana_indexer::InstructionDecoder;
-use solana_transaction_status::UiInstruction;
-
 pub struct MyDecoder;
-
 impl InstructionDecoder<TransferEvent> for MyDecoder {
     fn decode(&self, instruction: &UiInstruction) -> Option<TransferEvent> {
-        // Parse instruction data and return TransferEvent if successful
-        // Return None if instruction doesn't match
-        todo!("Implement your custom parsing logic")
+        // Parse instruction data
+        todo!()
     }
 }
-```
 
-### Step 4: Implement Your EventHandler
-
-```rust
-use solana_indexer::{EventHandler, SolanaIndexerError, TxMetadata};
-use solana_indexer::generated::TransferEvent; // Assuming your IDL defines a TransferEvent
-use sqlx::PgPool;
-use async_trait::async_trait;
-
-/// A sample event handler for `TransferEvent`s.
-pub struct MyTransferHandler;
-
+pub struct MyHandler;
 #[async_trait]
-impl EventHandler<TransferEvent> for MyTransferHandler {
-    /// Handles a `TransferEvent`, prints its details, and persists it to a database.
-    ///
-    /// # Arguments
-    ///
-    /// * `event` - The typed event to process
-    /// * `context` - transaction metadata (slot, block time, fee, balances)
-    /// * `db` - A database connection pool for performing persistence operations.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success (`Ok(())`) or a `SolanaIndexerError` if
-    /// a database operation fails.
-    async fn handle(&self, event: TransferEvent, context: &TxMetadata, db: &PgPool)
-        -> Result<(), SolanaIndexerError> {
-        println!("Processing Transfer: Sig={}, From={}, To={}, Amount={}",
-                 context.signature, event.from, event.to, event.amount);
-
-        // Example: Persist event data to a 'transfers' table in the database.
-        // `sqlx::query!` is used for type-safe and injection-resistant queries.
-        sqlx::query!(
-            "INSERT INTO transfers (signature, from_wallet, to_wallet, amount)
-             VALUES ($1, $2, $3, $4)",
-            context.signature, event.from.to_string(), event.to.to_string(), event.amount as i64
-        )
-        .execute(db)
-        .await
-        .map_err(SolanaIndexerError::DatabaseError)?; // Map `sqlx::Error` to `SolanaIndexerError::DatabaseError`
-        
+impl EventHandler<TransferEvent> for MyHandler {
+    async fn handle(&self, event: TransferEvent, ctx: &TxMetadata, db: &PgPool) -> Result<()> {
+        sqlx::query("INSERT INTO transfers (sig, from_addr, to_addr, amount) VALUES ($1,$2,$3,$4)")
+            .bind(&ctx.signature)
+            .bind(&event.from)
+            .bind(&event.to)
+            .bind(event.amount as i64)
+            .execute(db).await?;
         Ok(())
     }
 }
 ```
 
-### Step 5: Initialize and Run SolanaIndexer
+### Step 3: Run
 
 ```rust
-use solana_indexer::{EventHandler, SolanaIndexer, SolanaIndexerError, TxMetadata};
-// Assuming `TransferEvent` is generated by the SolanaIndexer procedural macro
-use solana_indexer::generated::TransferEvent; 
-use async_trait::async_trait;
-use sqlx::PgPool;
-use std::env;
-use std::error::Error; // Import the standard `Error` trait for main's return type
-
-// Re-using the handler struct from Step 2 for clarity.
-// In a real application, this would typically be defined in its own module.
-pub struct MyTransferHandler;
-
-#[async_trait]
-impl EventHandler<TransferEvent> for MyTransferHandler {
-    async fn handle(&self, event: TransferEvent, context: &TxMetadata, db: &PgPool)
-        -> Result<(), SolanaIndexerError> {
-        println!("Processing Transfer: Sig={}, From={}, To={}, Amount={}",
-                 context.signature, event.from, event.to, event.amount);
-
-        sqlx::query!(
-            "INSERT INTO transfers (signature, from_wallet, to_wallet, amount)
-             VALUES ($1, $2, $3, $4)",
-            context.signature, event.from.to_string(), event.to.to_string(), event.amount as i64
-        )
-        .execute(db)
-        .await
-        .map_err(SolanaIndexerError::DatabaseError)?;
-        
-        Ok(())
-    }
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // Loads environment variables from a `.env` file for local development.
-    // This call is optional and will not error if the file is not found,
-    // but subsequent `env::var` calls will fail if variables are missing.
-    dotenv::dotenv().ok(); 
-
-    // Retrieve configuration from environment variables.
-    // Errors from `env::var` are mapped to `SolanaIndexerError::ConfigError`
-    // and then boxed for the consistent main function return type.
-    let rpc_url = env::var("RPC_URL")
-        .map_err(|e| Box::new(SolanaIndexerError::ConfigError(e)) as Box<dyn Error>)?;
-    let database_url = env::var("DATABASE_URL")
-        .map_err(|e| Box::new(SolanaIndexerError::ConfigError(e)) as Box<dyn Error>)?;
-    let program_id_str = env::var("PROGRAM_ID")
-        .map_err(|e| Box::new(SolanaIndexerError::ConfigError(e)) as Box<dyn Error>)?;
-
-    // Initialize SolanaIndexer with the provided configuration.
-    // Register both the decoder (for parsing) and handler (for processing).
-    // The `SolanaIndexer::new()` builder pattern allows for flexible
-    // and type-safe configuration.
+async fn main() -> Result<()> {
     let config = SolanaIndexerConfigBuilder::new()
-        .with_rpc(&rpc_url)
-        .with_database(&database_url)
-        .program_id(&program_id_str)
-        .build()
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        .with_rpc("http://127.0.0.1:8899")
+        .with_database("postgresql://user:pass@localhost/mydb")
+        .program_id("11111111111111111111111111111111")
+        .build()?;
 
-    // Initialize and run the indexer.
-    let mut indexer = SolanaIndexer::new(config).await
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-
-    indexer.register_decoder(&program_id_str, Box::new(MyDecoder));
-    indexer.register_handler::<TransferEvent>(Box::new(MyTransferHandler));
-
-    indexer.start().await
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-
-    println!("SolanaIndexer indexer started successfully.");
-
+    let mut indexer = SolanaIndexer::new(config).await?;
+    indexer.register_decoder("11111111111111111111111111111111", Box::new(MyDecoder));
+    indexer.register_handler::<TransferEvent>(Box::new(MyHandler));
+    indexer.start().await?;
     Ok(())
 }
 ```
-**That's it! Your indexer is now configured to process `TransferEvent`s for your specified program.**
 
-## 11. Production Roadmap & Future Enhancements
+---
 
-SolanaIndexer is on a continuous path of improvement, with a clear roadmap to enhance its capabilities for production environments.
+## 11. Completed Features & Roadmap
 
-*   **Phase 1 (Current):** Foundational localnet polling, robust idempotency, `sqlx` integration, IDL-driven type generation.
-*   **Phase 2: Real-time & Resilient Indexing:**
-    *   WebSocket subscriptions for low-latency event processing.
-    *   Configurable retry logic with exponential backoff for transient RPC failures.
-    *   Rate limiting to respect RPC provider quotas.
-*   **Phase 3: Data Integrity & Provider Integration:**
-    *   Helius / other specialized RPC provider integrations for enhanced reliability, historical data, and gap-filling backfill.
-    *   Monitoring and observability dashboards (e.g., Prometheus/Grafana integration).
-    *   Dead-letter queue support for unprocessable events.
-*   **Phase 4: Advanced Indexing Patterns:**
-    *   Multi-program indexing capabilities from a single SolanaIndexer instance.
-    *   Custom RPC provider support for greater flexibility.
-    *   Performance benchmarks and optimizations against existing indexing solutions.
-    *   Support for on-chain state change tracking (e.g., account data changes).
+### ✅ Completed (v0.1.0)
+
+| Feature | Status |
+|:---|:---|
+| RPC Polling (localnet + mainnet) | ✅ |
+| WebSocket Subscriptions | ✅ |
+| Hybrid Dual-Stream (WS + RPC) | ✅ |
+| Helius Enhanced RPC | ✅ |
+| Parallel Transaction Fetching | ✅ |
+| Idempotency Tracking | ✅ |
+| Multi-Program Indexing | ✅ |
+| Instruction Decoder Registry | ✅ |
+| Log Decoder Registry | ✅ |
+| Account Decoder Registry | ✅ |
+| IDL-Driven Type Generation (proc macros) | ✅ |
+| Historical Backfill Engine | ✅ |
+| Reorg Detection & Finality Monitor | ✅ |
+| `EventHandler::on_rollback()` | ✅ |
+| Builder Pattern Configuration | ✅ |
+| Criterion Benchmarks (decoder, storage, throughput) | ✅ |
+| Integration Test Suite | ✅ |
+| 11 Working Examples (Jupiter, Raydium, SPL, etc.) | ✅ |
+
+### 🚀 Roadmap (v0.2.0+)
+
+| Feature | Priority | Description |
+|:---|:---|:---|
+| **Yellowstone gRPC Streaming** | 🔴 High | Sub-50ms latency via Geyser plugin integration |
+| **crates.io Release** | 🔴 High | Publish to crates.io for ecosystem adoption |
+| **Configurable Retry Logic** | 🟡 Medium | Exponential backoff for transient RPC failures |
+| **Dead-Letter Queue** | 🟡 Medium | Capture events that fail after all retries |
+| **Prometheus/Grafana Metrics** | 🟡 Medium | Observability dashboard integration |
+| **Custom Database Backends** | 🟡 Medium | SQLite, ClickHouse, MongoDB support |
+| **Rate Limiting** | 🟢 Low | Respect RPC provider quotas automatically |
+| **GraphQL Query Layer** | 🟢 Low | Auto-generated query API from indexed data |
