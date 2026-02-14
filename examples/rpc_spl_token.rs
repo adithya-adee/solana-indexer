@@ -312,8 +312,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Press Ctrl+C to stop\n");
     println!("{}", "=".repeat(80));
 
-    // Start the indexer - this runs indefinitely until interrupted
-    indexer.start().await?;
+    // Get cancellation token before moving indexer
+    let token = indexer.cancellation_token();
+
+    // Spawn the indexer in a background task
+    let indexer_handle = tokio::spawn(async move { indexer.start().await });
+
+    // Wait for Ctrl+C
+    tokio::select! {
+        result = indexer_handle => {
+            match result {
+                Ok(Ok(())) => println!("✅ Indexer completed successfully."),
+                Ok(Err(e)) => eprintln!("❌ Indexer error: {}", e),
+                Err(e) => eprintln!("❌ Indexer task panicked: {}", e),
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            println!("\n⏰ Ctrl+C received. Initiating graceful shutdown...");
+            token.cancel();
+            println!("✅ Shutdown signal sent. Indexer will stop gracefully.");
+        }
+    }
 
     Ok(())
 }

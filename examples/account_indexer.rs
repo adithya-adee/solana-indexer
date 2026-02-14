@@ -118,6 +118,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     let mut indexer = SolanaIndexer::new(config).await?;
+    let token = indexer.cancellation_token(); // Get cancellation token before moving indexer
 
     // Register Components
     indexer.register_schema_initializer(Box::new(UserSchemaInitializer));
@@ -133,9 +134,30 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ Registered Decoder, Handler, and Schema");
     println!("🔄 Starting Indexer Loop...");
+    println!("   Press Ctrl+C to stop gracefully.\n");
 
-    // Run the standard indexer loop
-    indexer.start().await?;
+    // Spawn the indexer in a background task
+    let indexer_handle = tokio::spawn(async move { indexer.start().await });
+
+    // Wait for Ctrl+C
+    tokio::select! {
+        result = indexer_handle => {
+            // Indexer completed on its own (unlikely in normal operation)
+            match result {
+                Ok(Ok(())) => println!("✅ Indexer completed successfully."),
+                Ok(Err(e)) => eprintln!("❌ Indexer error: {}", e),
+                Err(e) => eprintln!("❌ Indexer task panicked: {}", e),
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            println!("\n⏰ Ctrl+C received. Initiating graceful shutdown...");
+            token.cancel();
+
+            // The indexer's internal Ctrl+C handler will also trigger, but we cancel the token
+            // to ensure graceful shutdown. The indexer should stop on its own.
+            println!("✅ Shutdown signal sent. Indexer will stop gracefully.");
+        }
+    }
 
     Ok(())
 }

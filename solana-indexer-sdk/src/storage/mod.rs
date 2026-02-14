@@ -332,10 +332,10 @@ impl Storage {
     /// The signature of the transaction with the highest slot number, or `None`
     /// if no transactions have been processed yet.
     pub async fn get_last_processed_signature(&self) -> Result<Option<String>> {
-        let result = sqlx::query_scalar::<_, Option<String>>(
+        let result = sqlx::query_scalar::<_, String>(
             "SELECT signature FROM _solana_indexer_sdk_processed ORDER BY slot DESC, indexed_at DESC LIMIT 1"
         )
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
         Ok(result)

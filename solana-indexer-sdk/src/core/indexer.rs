@@ -156,6 +156,12 @@ impl SolanaIndexer {
 
     /// Returns a reference to the handler registry for registering handlers.
     #[must_use]
+    pub fn config(&self) -> &SolanaIndexerConfig {
+        &self.config
+    }
+
+    /// Returns a reference to the handler registry for registering handlers.
+    #[must_use]
     pub fn handler_registry(&self) -> &HandlerRegistry {
         &self.handler_registry
     }

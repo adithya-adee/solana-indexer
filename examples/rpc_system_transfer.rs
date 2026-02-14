@@ -1,19 +1,12 @@
-//! System Transfer Indexer Example
+//! System Transfer Indexer Example - Advanced Showcase
 //!
-//! This example demonstrates the Solana Indexer SDK's flexible architecture by building
-//! a custom indexer for System Program transfers (native SOL transfers). It showcases:
+//! This example serves as a professional, production-ready template for building
+//! a high-performance indexer. It demonstrates:
 //!
-//! 1. **Custom Instruction Decoding** - Parsing System Program transfer instructions
-//! 2. **Custom Event Handling** - Processing and storing transfer data in PostgreSQL
-//! 3. **Multi-Program Support** - Using the DecoderRegistry pattern
-//!
-//! ## Architecture
-//!
-//! ```text
-//! Transaction → InstructionDecoder<T> → Option<T> → EventHandler<T> → Database
-//!               (Parse instruction)     (Typed      (Process event)
-//!                                        Event)
-//! ```
+//! 1. **Advanced Configuration**: Worker threads, registry limits, commitment levels.
+//! 2. **Graceful Shutdown**: Programmatic shutdown using a `CancellationToken`.
+//! 3. **Start Strategies**: How to resume from a checkpoint (`StartStrategy::Resume`).
+//! 4. **Standard SDK Pattern**: The core Define->Decode->Handle pattern.
 //!
 //! ## Usage
 //!
@@ -21,23 +14,26 @@
 //! ```env
 //! RPC_URL=http://127.0.0.1:8899
 //! DATABASE_URL=postgresql://postgres:password@localhost/solana_indexer_sdk
-//! PROGRAM_ID=11111111111111111111111111111111  # System Program
 //! ```
 //!
 //! Run the example:
 //! ```bash
-//! cargo run --example system_transfer_indexer
+//! cargo run --example rpc_system_transfer
 //! ```
 
 use async_trait::async_trait;
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_indexer_sdk::{
-    calculate_discriminator, EventDiscriminator, EventHandler, InstructionDecoder,
+    calculate_discriminator,
+    config::{CommitmentLevel, RegistryConfig, StartStrategy},
+    EventDiscriminator, EventHandler, InstructionDecoder, SolanaIndexer,
     SolanaIndexerConfigBuilder, SolanaIndexerError,
 };
 use solana_sdk::pubkey::Pubkey;
 use solana_transaction_status::{UiInstruction, UiParsedInstruction};
 use sqlx::PgPool;
+use std::time::Duration;
+use tokio::time::sleep;
 
 // ================================================================================================
 // Event Definition
@@ -173,14 +169,12 @@ impl EventHandler<SystemTransferEvent> for SystemTransferHandler {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
-    println!("🚀 System Transfer Indexer (Native SOL Transfers)\n");
-    println!("This indexer monitors and stores all native SOL transfers on Solana.\n");
+    println!("🚀 Advanced System Transfer Indexer Showcase\n");
 
     // ============================================================================================
-    // Configuration
+    // 1. Advanced Configuration
     // ============================================================================================
 
     let rpc_url = std::env::var("RPC_URL")?;
@@ -188,82 +182,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let program_id = std::env::var("PROGRAM_ID")
         .unwrap_or_else(|_| "11111111111111111111111111111111".to_string());
 
+    // Configure registry limits to prevent unbounded memory growth in production.
+    let registry_config = RegistryConfig {
+        max_decoder_programs: 10,
+        max_handlers: 10,
+        enable_metrics: true, // Log registry stats periodically
+        ..Default::default()
+    };
+
     println!("📋 Configuration:");
     println!("   RPC URL: {}", rpc_url);
     println!("   Database: {}", database_url);
     println!("   Program ID: {}", program_id);
-    println!("   Program: System Program (Native SOL Transfers)\n");
 
-    // Build indexer configuration
+    // Build indexer configuration with advanced settings.
     let config = SolanaIndexerConfigBuilder::new()
         .with_rpc(rpc_url)
         .with_database(database_url.clone())
         .program_id(program_id)
-        .with_poll_interval(2) // Poll every 2 seconds for new transactions
-        .with_batch_size(10) // Fetch up to 10 transactions per batch
+        .with_poll_interval(2)
+        .with_batch_size(10)
+        .with_worker_threads(4) // Use 4 parallel threads for fetching transactions.
+        .with_commitment(CommitmentLevel::Confirmed) // Index confirmed blocks.
+        .with_start_strategy(StartStrategy::Resume) // Resume from the last processed signature.
+        .with_registry_config(registry_config)
         .build()?;
 
     // ============================================================================================
-    // Indexer Setup
+    // 2. Indexer Setup
     // ============================================================================================
 
-    // Create the indexer instance
-    let mut indexer = solana_indexer_sdk::SolanaIndexer::new(config).await?;
+    let mut indexer = SolanaIndexer::new(config).await?;
+    let token = indexer.cancellation_token(); // Get token for graceful shutdown.
 
-    // Initialize database schema
-    println!("📊 Initializing database schema...");
+    println!("   Worker Threads: {}", indexer.config().worker_threads);
+    println!("   Commitment: {:?}", indexer.config().commitment_level);
+    println!("   Start Strategy: {:?}", indexer.config().start_strategy);
+
     let handler = SystemTransferHandler;
     let db_pool = sqlx::PgPool::connect(&database_url).await?;
     handler.initialize_schema(&db_pool).await?;
-    println!("✅ Database schema ready\n");
+    println!("\n✅ Database schema ready");
 
     // ============================================================================================
-    // Register Decoder
+    // 3. Register Components
     // ============================================================================================
 
-    println!("🔧 Registering instruction decoder...");
-
-    // Register the System Transfer decoder with the decoder registry
-    // The decoder registry matches by program name (e.g., "system", "spl-token")
-    // NOT by program ID (the pubkey)
     indexer.decoder_registry_mut()?.register(
-        "system".to_string(), // Program name as it appears in parsed instructions
+        "system".to_string(),
         Box::new(
             Box::new(SystemTransferDecoder) as Box<dyn InstructionDecoder<SystemTransferEvent>>
         ),
     )?;
 
-    println!("✅ Decoder registered for 'system' program\n");
+    indexer.handler_registry_mut()?.register(
+        SystemTransferEvent::discriminator(),
+        Box::new(Box::new(handler) as Box<dyn EventHandler<SystemTransferEvent>>),
+    )?;
+
+    println!("✅ Decoder and Handler registered\n");
 
     // ============================================================================================
-    // Register Handler
+    // 4. Start Indexer with Graceful Shutdown
     // ============================================================================================
+    println!("🔄 Starting indexer in background...");
+    println!("   Will run for 15 seconds before graceful shutdown.\n");
 
-    println!("🔧 Registering event handler...");
+    // Spawn the indexer to run in the background.
+    let indexer_handle = tokio::spawn(async move { indexer.start().await });
 
-    // Wrap the handler in a Box for dynamic dispatch
-    let handler_box: Box<dyn EventHandler<SystemTransferEvent>> = Box::new(handler);
+    // In a real application, you would wait for a signal (e.g., another Ctrl+C handler,
+    // a shutdown API call, or a parent task completing).
+    sleep(Duration::from_secs(15)).await;
 
-    // Register the handler with the indexer
-    // The SDK will automatically route SystemTransferEvent instances to this handler
-    indexer
-        .handler_registry_mut()?
-        .register(SystemTransferEvent::discriminator(), Box::new(handler_box))?;
+    // Initiate graceful shutdown.
+    println!("\n⏰ 15 seconds elapsed. Initiating graceful shutdown...");
+    token.cancel();
 
-    println!("✅ Handler registered\n");
-
-    // ============================================================================================
-    // Start Indexing
-    // ============================================================================================
-
-    println!("🔄 Starting indexer...");
-    println!("   Monitoring native SOL transfers on Solana");
-    println!("   Compatible with spl-transfer-generator");
-    println!("   Press Ctrl+C to stop\n");
-    println!("{}", "=".repeat(80));
-
-    // Start the indexer - this runs indefinitely until interrupted
-    indexer.start().await?;
+    // Wait for the indexer to finish its current work and stop.
+    match tokio::time::timeout(Duration::from_secs(10), indexer_handle).await {
+        Ok(Ok(Ok(_))) => println!("✅ Indexer shut down gracefully."),
+        Ok(Ok(Err(e))) => eprintln!("❌ Indexer task exited with an error: {}", e),
+        Ok(Err(e)) => eprintln!("❌ Indexer task failed to join: {}", e),
+        Err(_) => eprintln!("❌ Indexer failed to shut down within 10 seconds."),
+    }
 
     Ok(())
 }

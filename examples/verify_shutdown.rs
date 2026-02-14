@@ -4,13 +4,20 @@ use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Setup logging
-    // env_logger::init();
+    // Load environment variables
+    dotenvy::dotenv().ok();
+
+    // Get configuration from environment or use defaults
+    let rpc_url =
+        std::env::var("RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgresql://postgres:password@localhost:5432/solana_indexer_sdk".to_string()
+    });
 
     // Create a configuration
     let config = SolanaIndexerConfigBuilder::new()
-        .with_rpc("https://api.devnet.solana.com") // Use real endpoint or mock? Real for now
-        .with_database("postgresql://postgres:password@localhost:5432/solana_indexer_sdk") // Expect failure but fine for shutdown test
+        .with_rpc(rpc_url)
+        .with_database(database_url)
         .program_id("11111111111111111111111111111111")
         .with_stale_tentative_threshold(100)
         .build()?;

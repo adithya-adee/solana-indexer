@@ -36,8 +36,8 @@ Initialize the `SolanaIndexer` with a `SolanaIndexerConfig` (built via `SolanaIn
 
 | Category | Example | Focus |
 |:---|:---|:---|
-| **Basics** | [rpc_system_transfer.rs](./rpc_system_transfer.rs) | Native SOL transfers via RPC polling. Best starting point. |
-| | [rpc_spl_token.rs](./rpc_spl_token.rs) | SPL Token transfers (e.g., USDC) with complex instruction parsing. |
+| ⭐ **Showcase** | [rpc_system_transfer.rs](./rpc_system_transfer.rs) | **Production-ready template.** Demonstrates advanced configuration, graceful shutdown, and professional practices. **Start here.** |
+| **Basics** | [rpc_spl_token.rs](./rpc_spl_token.rs) | SPL Token transfers (e.g., USDC) with complex instruction parsing. |
 | **Real-time** | [ws_system_transfer.rs](./ws_system_transfer.rs) | Sub-second latency using WebSocket subscriptions. |
 | | [helius_system_transfer.rs](./helius_system_transfer.rs) | Using Helius as a high-performance data source. |
 | **Advanced** | [account_indexer.rs](./account_indexer.rs) | Indexing account state changes (Crank-based) instead of instructions. |

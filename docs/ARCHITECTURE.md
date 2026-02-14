@@ -353,8 +353,8 @@ async fn main() -> Result<()> {
         .build()?;
 
     let mut indexer = SolanaIndexer::new(config).await?;
-    indexer.register_decoder("11111111111111111111111111111111", Box::new(MyDecoder));
-    indexer.register_handler::<TransferEvent>(Box::new(MyHandler));
+    indexer.register_decoder("system", MyDecoder)?;
+    indexer.register_handler(MyHandler)?;
     indexer.start().await?;
     Ok(())
 }
