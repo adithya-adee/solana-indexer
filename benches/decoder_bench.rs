@@ -1,3 +1,4 @@
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use serde_json::json;
 use solana_indexer_sdk::core::decoder::Decoder;
 use solana_transaction_status::{
@@ -5,7 +6,6 @@ use solana_transaction_status::{
     EncodedTransaction, EncodedTransactionWithStatusMeta, UiInstruction, UiMessage,
     UiParsedInstruction, UiParsedMessage, UiTransaction, UiTransactionStatusMeta,
 };
-use std::time::Instant;
 
 fn create_mock_transaction(
     instructions: Vec<UiInstruction>,
@@ -43,41 +43,39 @@ fn create_mock_transaction(
     }
 }
 
-fn main() {
-    println!("Starting Decoder Benchmark...");
-
+fn decoder_benchmark(c: &mut Criterion) {
     let decoder = Decoder::new();
-    let iterations = 100_000;
 
-    let start = Instant::now();
+    // Setup input data
+    let data = vec![0u8; 32];
+    let instruction = UiInstruction::Parsed(UiParsedInstruction::Parsed(
+        solana_transaction_status::parse_instruction::ParsedInstruction {
+            program: "system".to_string(),
+            program_id: "11111111111111111111111111111111".to_string(),
+            parsed: json!({"type": "transfer", "data": data}),
+            stack_height: None,
+        },
+    ));
 
-    for i in 0..iterations {
-        // Create mock data using loop counter
-        let data = vec![(i % 255) as u8; 32];
+    let tx = create_mock_transaction(vec![instruction.clone()]);
+    let large_tx = create_mock_transaction(vec![instruction; 100]); // Stress test with 100 instructions
 
-        let instruction = UiInstruction::Parsed(UiParsedInstruction::Parsed(
-            solana_transaction_status::parse_instruction::ParsedInstruction {
-                program: "system".to_string(),
-                program_id: "11111111111111111111111111111111".to_string(),
-                parsed: json!({"type": "transfer", "data": data}),
-                stack_height: None,
-            },
-        ));
+    let mut group = c.benchmark_group("decoder");
 
-        let tx = create_mock_transaction(vec![instruction]);
-        let _ = decoder.decode_transaction(&tx);
+    group.bench_function("decode_single_instruction", |b| {
+        b.iter(|| {
+            decoder.decode_transaction(black_box(&tx)).unwrap();
+        })
+    });
 
-        if i % 10000 == 0 {
-            print!(".");
-            use std::io::Write;
-            std::io::stdout().flush().unwrap();
-        }
-    }
+    group.bench_function("decode_100_instructions", |b| {
+        b.iter(|| {
+            decoder.decode_transaction(black_box(&large_tx)).unwrap();
+        })
+    });
 
-    let duration = start.elapsed();
-    println!("\nDecoded {} transactions in {:?}", iterations, duration);
-    println!(
-        "Throughput: {:.2} tx/s",
-        iterations as f64 / duration.as_secs_f64()
-    );
+    group.finish();
 }
+
+criterion_group!(benches, decoder_benchmark);
+criterion_main!(benches);
