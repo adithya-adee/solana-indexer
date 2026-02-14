@@ -278,9 +278,10 @@ impl Decoder {
     /// ```no_run
     /// # use solana_indexer_sdk::{Decoder, Fetcher};
     /// # use solana_sdk::signature::Signature;
+    /// # use solana_sdk::commitment_config::CommitmentConfig;
     /// # use std::str::FromStr;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let fetcher = Fetcher::new("http://127.0.0.1:8899");
+    /// let fetcher = Fetcher::new("http://127.0.0.1:8899", CommitmentConfig::confirmed());
     /// let decoder = Decoder::new();
     ///
     /// let sig = Signature::from_str("5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7")?;

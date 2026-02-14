@@ -179,11 +179,17 @@ async fn test_handler_integration_with_database() {
         .execute(storage.pool())
         .await;
 
+    let _ = sqlx::query("DELETE FROM _solana_indexer_sdk_tentative WHERE signature = $1")
+        .bind(test_signature)
+        .execute(storage.pool())
+        .await;
+
     let config = SolanaIndexerConfigBuilder::new()
         .with_rpc(mock_server.uri())
         .with_database(&database_url)
         .program_id("11111111111111111111111111111111")
         .with_poll_interval(1)
+        .with_start_signature("1111111111111111111111111111111111111111111111111111111111111111")
         .build()
         .expect("Failed to build config");
 

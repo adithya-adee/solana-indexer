@@ -196,9 +196,10 @@ pub trait SchemaInitializer: Send + Sync {
 ///     async fn handle(
 ///         &self,
 ///         event: TransferEvent,
+///         context: &solana_indexer_sdk::types::metadata::TxMetadata,
 ///         db: &PgPool,
-///         signature: &str,
 ///     ) -> Result<(), SolanaIndexerError> {
+///         let signature = &context.signature;
 ///         println!("Processing transfer: {} -> {} ({})", event.from, event.to, event.amount);
 ///         
 ///         // Insert into database

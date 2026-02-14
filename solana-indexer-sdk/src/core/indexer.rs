@@ -267,12 +267,17 @@ impl SolanaIndexer {
     /// # Example
     ///
     /// ```no_run
-    /// # use solana_indexer_sdk::SolanaIndexer;
+    /// # use solana_indexer_sdk::{SolanaIndexer, TxMetadata};
+    /// # use async_trait::async_trait;
     /// # struct MyHandler;
     /// # struct MyEvent;
-    /// # impl solana_indexer_sdk::EventHandler<MyEvent> for MyHandler { async fn handle(&self, _: MyEvent, _: &sqlx::PgPool, _: &str) -> crate::utils::error::Result<()> { Ok(()) } }
+    /// # #[async_trait]
+    /// # impl solana_indexer_sdk::EventHandler<MyEvent> for MyHandler { async fn handle(&self, _: MyEvent, _: &TxMetadata, _: &sqlx::PgPool) -> solana_indexer_sdk::Result<()> { Ok(()) } }
     /// # impl solana_indexer_sdk::EventDiscriminator for MyEvent { fn discriminator() -> [u8; 8] { [0; 8] } }
-    /// # impl borsh::BorshDeserialize for MyEvent { fn deserialize(buf: &mut &[u8]) -> std::io::Result<Self> { Ok(MyEvent) } }
+    /// # impl borsh::BorshDeserialize for MyEvent {
+    /// #   fn deserialize(buf: &mut &[u8]) -> std::io::Result<Self> { Ok(MyEvent) }
+    /// #   fn deserialize_reader<R: std::io::Read>(_: &mut R) -> std::io::Result<Self> { Ok(MyEvent) }
+    /// # }
     /// # fn example(indexer: &mut SolanaIndexer) {
     /// indexer.register_handler(MyHandler);
     /// # }

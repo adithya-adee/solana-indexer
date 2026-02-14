@@ -53,9 +53,10 @@
 //!     async fn handle(
 //!         &self,
 //!         event: TransferEvent,
+//!         context: &solana_indexer_sdk::TxMetadata,
 //!         db: &PgPool,
-//!         signature: &str,
 //!     ) -> Result<(), SolanaIndexerError> {
+//!         let _signature = &context.signature;
 //!         println!("Transfer: {} -> {} ({} lamports)", event.from, event.to, event.amount);
 //!         Ok(())
 //!     }

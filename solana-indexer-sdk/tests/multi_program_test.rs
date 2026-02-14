@@ -51,17 +51,10 @@ async fn test_multi_program_indexing() {
     let program1 = "11111111111111111111111111111111"; // System
     let program2 = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"; // Token
 
-    let sig1 =
-        "5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7";
-    let sig2 =
-        "2j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia8";
+    let sig1 = solana_sdk::signature::Keypair::new().to_base58_string();
+    let sig2 = solana_sdk::signature::Keypair::new().to_base58_string();
 
     // Mock getSignaturesForAddress for both programs
-    // Note: In reality, we'd need separate configs or run multiple indexers for multiple programs?
-    // The current SolanaIndexerConfig only accepts ONE program_id.
-    // So this test might verify running TWO indexer instances sharing the same DB?
-
-    // Mock for Program 1
     Mock::given(method("POST"))
         .and(body_string_contains("getSignaturesForAddress"))
         .and(body_string_contains(program1))
@@ -102,26 +95,28 @@ async fn test_multi_program_indexing() {
         .await;
 
     // Mock getTransaction for both
+    let s1 = sig1.clone();
+    let s2 = sig2.clone();
     Mock::given(method("POST"))
         .and(body_string_contains("getTransaction"))
         .respond_with(move |req: &wiremock::Request| {
             let body_str = String::from_utf8_lossy(&req.body);
-            if body_str.contains(sig1) {
+            if body_str.contains(&s1) {
                 ResponseTemplate::new(200).set_body_json(json!({
                     "jsonrpc": "2.0",
                     "result": {
                         "slot": 100,
-                        "transaction": { "signatures": [sig1], "message": { "accountKeys": [], "instructions": [], "recentBlockhash": "hash" } },
+                        "transaction": { "signatures": [s1], "message": { "accountKeys": [], "instructions": [], "recentBlockhash": "hash" } },
                         "meta": { "err": null, "status": { "Ok": null }, "fee": 0, "preBalances": [], "postBalances": [], "innerInstructions": [] }
                     },
                     "id": 1
                 }))
-            } else if body_str.contains(sig2) {
+            } else if body_str.contains(&s2) {
                 ResponseTemplate::new(200).set_body_json(json!({
                     "jsonrpc": "2.0",
                     "result": {
                         "slot": 100,
-                        "transaction": { "signatures": [sig2], "message": { "accountKeys": [], "instructions": [], "recentBlockhash": "hash" } },
+                        "transaction": { "signatures": [s2], "message": { "accountKeys": [], "instructions": [], "recentBlockhash": "hash" } },
                         "meta": { "err": null, "status": { "Ok": null }, "fee": 0, "preBalances": [], "postBalances": [], "innerInstructions": [] }
                     },
                     "id": 1
@@ -137,12 +132,41 @@ async fn test_multi_program_indexing() {
     let storage = Arc::new(Storage::new(&database_url).await.expect("Failed DB"));
     storage.initialize().await.expect("Failed Init");
 
-    // Clear DB
-    let _ = sqlx::query("DELETE FROM _solana_indexer_sdk_processed WHERE signature IN ($1, $2)")
-        .bind(sig1)
-        .bind(sig2)
-        .execute(storage.pool())
+    // Mock getBlock
+    Mock::given(method("POST"))
+        .and(body_string_contains("getBlock"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "blockhash": "11111111111111111111111111111111",
+                "previousBlockhash": "11111111111111111111111111111111",
+                "parentSlot": 99,
+                "transactions": [],
+                "rewards": [],
+                "blockTime": 1000,
+                "blockHeight": 100
+            },
+            "id": 1
+        })))
+        .mount(&mock_server)
         .await;
+
+    // Clear DB
+    let _ = sqlx::query(
+        "DELETE FROM _solana_indexer_sdk_processed WHERE signature = $1 OR signature = $2",
+    )
+    .bind(&sig1)
+    .bind(&sig2)
+    .execute(storage.pool())
+    .await;
+
+    let _ = sqlx::query(
+        "DELETE FROM _solana_indexer_sdk_tentative WHERE signature = $1 OR signature = $2",
+    )
+    .bind(&sig1)
+    .bind(&sig2)
+    .execute(storage.pool())
+    .await;
 
     // Config 1
     let config1 = SolanaIndexerConfigBuilder::new()
@@ -150,6 +174,7 @@ async fn test_multi_program_indexing() {
         .with_database(&database_url)
         .program_id(program1)
         .with_poll_interval(1)
+        .with_start_signature("1111111111111111111111111111111111111111111111111111111111111111")
         .build()
         .unwrap();
 
@@ -159,6 +184,7 @@ async fn test_multi_program_indexing() {
         .with_database(&database_url)
         .program_id(program2)
         .with_poll_interval(1)
+        .with_start_signature("1111111111111111111111111111111111111111111111111111111111111111")
         .build()
         .unwrap();
 
@@ -182,8 +208,8 @@ async fn test_multi_program_indexing() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // Verify both are processed
-    let p1 = storage.is_processed(sig1).await.unwrap();
-    let p2 = storage.is_processed(sig2).await.unwrap();
+    let p1 = storage.is_processed(&sig1).await.unwrap();
+    let p2 = storage.is_processed(&sig2).await.unwrap();
 
     assert!(p1, "Sig1 should be processed");
     assert!(p2, "Sig2 should be processed");
