@@ -65,3 +65,7 @@ path = "ws_system_transfer.rs"
 [[example]]
 name = "multi_program_indexer_2"
 path = "multi_program_indexer_2.rs"
+
+[[example]]
+name = "idl_indexer"
+path = "idl_indexer.rs"

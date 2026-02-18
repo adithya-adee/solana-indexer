@@ -2,6 +2,6 @@
 members = [
     "solana-indexer-sdk",
     "benches",
-    "examples",
+    "examples", "solana-idl-parser",
 ]
 resolver = "2"

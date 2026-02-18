@@ -45,6 +45,83 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **Backfill Engine:** Seamlessly index historical data alongside real-time updates.
 - **Flexible Data Sources:** Support for RPC polling, WebSocket streams, and Helius Webhooks.
 - **Type-Safe Events:** Strongly-typed event definitions using Borsh serialization.
+- **IDL-Based Type Generation:** Automatically generate Rust types from Solana program IDL files.
+
+## IDL-Based Type Generation
+
+The SDK includes support for automatically generating Rust types from Solana program IDL files. This allows you to work with type-safe event and instruction types without manually writing boilerplate code.
+
+### Quick Start
+
+1. **Add the IDL parser feature** to your `Cargo.toml`:
+
+```toml
+[dependencies]
+solana-indexer-sdk = { path = "../solana-indexer-sdk", features = ["idl-parser"] }
+
+[build-dependencies]
+solana-idl-parser = { path = "../solana-idl-parser" }
+```
+
+2. **Create a `build.rs` file** in your project root:
+
+```rust
+use std::env;
+use std::path::PathBuf;
+
+fn main() {
+    let idl_path = PathBuf::from("idl/my_program.json");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let generated_path = out_dir.join("generated_types.rs");
+
+    solana_idl_parser::generate_sdk_types(&idl_path, &generated_path)
+        .expect("Failed to generate types from IDL");
+
+    println!("cargo:rerun-if-changed={}", idl_path.display());
+}
+```
+
+3. **Include the generated types** in your code:
+
+```rust
+// src/lib.rs or src/main.rs
+include!(concat!(env!("OUT_DIR"), "/generated_types.rs"));
+```
+
+4. **Use the generated types** in your decoders and handlers:
+
+```rust
+use solana_indexer_sdk::{EventHandler, EventDiscriminator};
+use sqlx::PgPool;
+
+// MyEvent is generated from your IDL
+impl EventHandler<MyEvent> for MyEventHandler {
+    async fn handle(
+        &self,
+        event: MyEvent,
+        context: &TxMetadata,
+        db: &PgPool,
+    ) -> Result<(), SolanaIndexerError> {
+        // Use the generated event type
+        println!("Received event: {:?}", event);
+        Ok(())
+    }
+}
+```
+
+### Generated Types
+
+The IDL parser generates:
+
+- **Event Structs**: With `BorshSerialize`, `BorshDeserialize`, and `EventDiscriminator` implementations
+- **Type Structs**: For custom types defined in your IDL
+- **Error Enums**: For program error codes
+
+All generated types are compatible with the SDK's decoder and handler system.
+
+### Example
+
+See [`examples/idl_indexer.rs`](../examples/idl_indexer.rs) for a complete example of using IDL-generated types in an indexer.
 
 ## Documentation
 
