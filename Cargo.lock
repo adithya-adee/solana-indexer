@@ -4205,9 +4205,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "borsh 1.6.0",
+ "bs58 0.5.1",
  "dotenvy",
  "serde_json",
+ "sha2 0.10.9",
  "solana-client",
+ "solana-idl-parser",
  "solana-indexer-sdk",
  "solana-sdk",
  "solana-transaction-status",

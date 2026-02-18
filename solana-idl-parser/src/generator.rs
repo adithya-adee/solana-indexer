@@ -30,6 +30,8 @@ pub fn generate_types_with_mode(idl: &Idl, mode: GenerationMode) -> Result<Strin
 /// Generate Anchor-compatible types
 fn generate_anchor_types(idl: &Idl) -> Result<String> {
     let mut code = quote! {
+        #![allow(dead_code)]
+        #![allow(unused_imports)]
         use anchor_lang::prelude::*;
     };
 
@@ -108,9 +110,10 @@ fn generate_anchor_types(idl: &Idl) -> Result<String> {
 /// Generate SDK-compatible types (Borsh + EventDiscriminator)
 fn generate_sdk_types(idl: &Idl) -> Result<String> {
     let mut code = quote! {
+        #![allow(dead_code)]
+        #![allow(unused_imports)]
         use borsh::{BorshDeserialize, BorshSerialize};
         use solana_sdk::pubkey::Pubkey;
-        use sha2::{Digest, Sha256};
         use solana_indexer_sdk::EventDiscriminator;
     };
 
@@ -214,10 +217,29 @@ fn generate_sdk_types(idl: &Idl) -> Result<String> {
                 }
             });
 
+            // Calculate discriminator for the instruction (Anchor standard: global:<name>)
+            let discriminator_preimage = format!("global:{}", ix.name);
+            let discriminator_bytes = calculate_discriminator_bytes(&discriminator_preimage);
+            let discriminator_lit = quote! { [#(#discriminator_bytes),*] };
+
             let instruction_args_struct = quote! {
                 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
                 pub struct #instruction_args_name_ident {
                     #(#fields)*
+                }
+
+                impl #instruction_args_name_ident {
+                    /// Returns the instruction discriminator for `#ix_name_pascal`.
+                    #[must_use]
+                    pub fn discriminator() -> [u8; 8] {
+                        #discriminator_lit
+                    }
+                }
+
+                impl EventDiscriminator for #instruction_args_name_ident {
+                    fn discriminator() -> [u8; 8] {
+                        Self::discriminator()
+                    }
                 }
             };
             code.extend(instruction_args_struct);
@@ -248,14 +270,15 @@ fn generate_sdk_types(idl: &Idl) -> Result<String> {
             let error_name_ident = Ident::new(error_name, Span::call_site());
             let error_code = error.code;
             let error_msg = &error.msg;
-            let error_msg_str = format!(" // {}", error_msg);
             quote! {
-                #error_name_ident = #error_code,#error_msg_str
+                #[doc = #error_msg]
+                #error_name_ident = #error_code,
             }
         });
 
         let error_enum = quote! {
             #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[repr(u32)]
             pub enum ProgramError {
                 #(#error_codes)*
             }
