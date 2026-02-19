@@ -1,0 +1,83 @@
+{
+  "version": "1.0.0",
+  "name": "comprehensive_test_program",
+  "address": "11111111111111111111111111111111",
+  "metadata": {
+    "name": "ComprehensiveTestProgram",
+    "version": "1.0.0",
+    "spec": "0.1.0",
+    "description": "A comprehensive test IDL for the solana-idl-parser"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [0, 1, 2, 3, 4, 5, 6, 7],
+      "accounts": [
+        { "name": "user", "isMut": true, "isSigner": false },
+        { "name": "authority", "isMut": false, "isSigner": true }
+      ],
+      "args": [
+        { "name": "name", "type": "string" },
+        { "name": "age", "type": "u8" }
+      ]
+    },
+    {
+      "name": "process_data",
+      "discriminator": [8, 9, 10, 11, 12, 13, 14, 15],
+      "accounts": [
+        {
+          "name": "data_account",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "nested",
+          "accounts": [
+            { "name": "nested_account", "isMut": false, "isSigner": false }
+          ]
+        }
+      ],
+      "args": [
+        { "name": "data", "type": { "vec": "u8" } },
+        { "name": "user_profile", "type": { "defined": "UserProfile" } }
+      ]
+    },
+    {
+      "name": "process_array",
+      "discriminator": [16, 17, 18, 19, 20, 21, 22, 23],
+      "accounts": [],
+      "args": [
+        { "name": "data", "type": { "array": ["u8", 32] } }
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "UserProfile",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "name", "type": "string" },
+          { "name": "age", "type": "u8" },
+          { "name": "country", "type": { "option": "string" } }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "UserInitialized",
+      "fields": [
+        { "name": "user", "type": "publicKey" },
+        { "name": "name", "type": "string" }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidUserData",
+      "msg": "Invalid user data provided"
+    }
+  ]
+}

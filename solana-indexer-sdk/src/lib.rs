@@ -163,10 +163,18 @@ pub use utils::macros::{
     IdlInstruction, IdlType, IdlTypeDefinition,
 };
 
+// IDL module is available for documentation purposes
+// Use solana_idl_parser::generate_sdk_types in build.rs scripts
+
 // Module declarations
 pub mod config;
 pub mod core;
+pub mod idl;
 pub mod storage;
 pub mod streams;
 pub mod types;
 pub mod utils;
+
+// Note: Generated types from IDL files should be included in your application code:
+// include!(concat!(env!("OUT_DIR"), "/generated_types.rs"));
+// This is not included here automatically to avoid compilation errors when IDL_PATH is not set.

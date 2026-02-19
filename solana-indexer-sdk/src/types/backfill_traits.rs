@@ -182,13 +182,23 @@ impl BackfillContext {
 ///
 /// # Example
 /// ```no_run
-/// use solana_indexer_sdk::types::backfill_traits::BackfillHandler;
-/// use solana_indexer_sdk::{TxMetadata, Result};
+/// use solana_indexer_sdk::{
+///     calculate_discriminator,
+///     types::backfill_traits::BackfillHandler,
+///     EventDiscriminator, Result, TxMetadata,
+/// };
+/// use borsh::{BorshDeserialize, BorshSerialize};
 /// use async_trait::async_trait;
 /// use sqlx::PgPool;
 ///
-/// #[derive(Debug, Clone)]
+/// #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 /// pub struct MyEvent { pub amount: u64 }
+///
+/// impl EventDiscriminator for MyEvent {
+///     fn discriminator() -> [u8; 8] {
+///         calculate_discriminator("MyEvent")
+///     }
+/// }
 ///
 /// pub struct MyBackfillHandler;
 ///
@@ -271,9 +281,9 @@ where
 ///         if ctx.current_lag() > 1000 {
 ///             let start = ctx.last_backfilled_slot.unwrap_or(0);
 ///             let end = ctx.latest_finalized_slot.saturating_sub(100); // Keep 100 slot buffer
-///             Some(BackfillRange::new(start, end))
+///             Ok(Some(BackfillRange::new(start, end)))
 ///         } else {
-///             None
+///             Ok(None)
 ///         }
 ///     }
 /// }
