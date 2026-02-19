@@ -469,13 +469,169 @@ impl TransactionSource for LaserstreamSource {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     #[tokio::test]
-//     async fn test_laserstream_source_initialization() {
-//         // Compile-time verification that the module structure is correct.
-//         // Actual gRPC connection requires a live endpoint, so we only verify
-//         // the module compiles and the types resolve correctly.
-//         assert!(true);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_sdk::pubkey::Pubkey;
+    use yellowstone_grpc_proto::geyser::{
+        subscribe_update::UpdateOneof, SubscribeUpdateTransaction, SubscribeUpdateTransactionInfo,
+    };
+    use yellowstone_grpc_proto::prelude::{
+        Message, MessageHeader, Transaction, TransactionStatusMeta,
+    };
+
+    #[tokio::test]
+    async fn test_process_update_success() {
+        let (sender, mut receiver) = mpsc::channel(100);
+
+        // Mock data
+        let signature = Signature::new_unique();
+        let slot = 12345;
+        let program_id = Pubkey::new_unique();
+        let account = Pubkey::new_unique();
+
+        // Construct a mock SubscribeUpdate
+        let update = SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::Transaction(SubscribeUpdateTransaction {
+                transaction: Some(SubscribeUpdateTransactionInfo {
+                    signature: signature.as_ref().to_vec(),
+                    is_vote: false,
+                    transaction: Some(Transaction {
+                        signatures: vec![signature.as_ref().to_vec()],
+                        message: Some(Message {
+                            header: Some(MessageHeader {
+                                num_required_signatures: 1,
+                                num_readonly_signed_accounts: 0,
+                                num_readonly_unsigned_accounts: 0,
+                            }),
+                            account_keys: vec![
+                                program_id.as_ref().to_vec(),
+                                account.as_ref().to_vec(),
+                            ],
+                            recent_blockhash: vec![0; 32],
+                            instructions: vec![
+                                yellowstone_grpc_proto::prelude::CompiledInstruction {
+                                    program_id_index: 0,
+                                    accounts: vec![1],
+                                    data: vec![1, 2, 3],
+                                },
+                            ],
+                            versioned: false,
+                            address_table_lookups: vec![],
+                        }),
+                    }),
+                    meta: Some(TransactionStatusMeta {
+                        err: None,
+                        fee: 5000,
+                        pre_balances: vec![100, 200],
+                        post_balances: vec![90, 200],
+                        inner_instructions: vec![],
+                        inner_instructions_none: true,
+                        log_messages: vec!["log1".to_string()],
+                        log_messages_none: false,
+                        pre_token_balances: vec![],
+                        post_token_balances: vec![],
+                        rewards: vec![],
+                        loaded_writable_addresses: vec![],
+                        loaded_readonly_addresses: vec![],
+                        return_data: None,
+                        return_data_none: true,
+                        compute_units_consumed: Some(100),
+                    }),
+                    index: 0,
+                }),
+                slot,
+            })),
+        };
+
+        // Call process_update
+        LaserstreamSource::process_update(update, &sender)
+            .await
+            .expect("process_update failed");
+
+        // Verify result
+        let event = receiver.recv().await.expect("No event received");
+        match event {
+            crate::streams::TransactionEvent::FullTransaction {
+                signature: sig,
+                slot: s,
+                tx,
+            } => {
+                assert_eq!(sig, signature);
+                assert_eq!(s, slot);
+                assert_eq!(tx.slot, slot);
+
+                // Verify transaction details
+                if let EncodedTransaction::Json(ui_tx) = &tx.transaction.transaction {
+                    assert_eq!(ui_tx.signatures[0], signature.to_string());
+                    if let UiMessage::Raw(msg) = &ui_tx.message {
+                        assert_eq!(msg.account_keys.len(), 2);
+                        assert_eq!(msg.account_keys[0], program_id.to_string());
+                        assert_eq!(msg.instructions.len(), 1);
+                        assert_eq!(msg.instructions[0].program_id_index, 0);
+                    } else {
+                        panic!("Expected Raw message");
+                    }
+                } else {
+                    panic!("Expected Json transaction");
+                }
+
+                // Verify meta
+                let meta = tx.transaction.meta.as_ref().expect("Meta missing");
+                assert_eq!(meta.fee, 5000);
+                assert_eq!(meta.pre_balances, vec![100, 200]);
+                if let OptionSerializer::Some(logs) = &meta.log_messages {
+                    assert_eq!(logs.len(), 1);
+                } else {
+                    panic!("Expected logs");
+                }
+            }
+            _ => panic!("Expected FullTransaction event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_update_ignore_non_transaction() {
+        let (sender, _) = mpsc::channel(100);
+
+        // Mock a non-transaction update (e.g., Slot)
+        let update = SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::Slot(
+                yellowstone_grpc_proto::geyser::SubscribeUpdateSlot {
+                    slot: 123,
+                    parent: Some(122),
+                    status: 1,
+                },
+            )),
+        };
+
+        // Should return Ok(()) but send nothing
+        LaserstreamSource::process_update(update, &sender)
+            .await
+            .expect("Should not error on ignored update");
+    }
+
+    #[tokio::test]
+    async fn test_process_update_invalid_signature() {
+        let (sender, _) = mpsc::channel(100);
+
+        let update = SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::Transaction(SubscribeUpdateTransaction {
+                transaction: Some(SubscribeUpdateTransactionInfo {
+                    signature: vec![0; 5], // Invalid length
+                    is_vote: false,
+                    transaction: None,
+                    meta: None,
+                    index: 0,
+                }),
+                slot: 1,
+            })),
+        };
+
+        let result = LaserstreamSource::process_update(update, &sender).await;
+        assert!(matches!(result, Err(SolanaIndexerError::DataError(_))));
+    }
+}
