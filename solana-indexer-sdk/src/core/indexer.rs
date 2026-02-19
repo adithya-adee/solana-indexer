@@ -694,6 +694,96 @@ impl SolanaIndexer {
                 }
             }
             SourceConfig::Hybrid { .. } => self.process_hybrid_source().await,
+            SourceConfig::Laserstream { .. } => self.process_laserstream_source().await,
+        }
+    }
+
+    /// Internal method to run the Laserstream (gRPC) source loop.
+    async fn process_laserstream_source(self) -> Result<()> {
+        use crate::streams::laserstream::LaserstreamSource;
+
+        logging::log(logging::LogLevel::Info, "Starting Laserstream source...");
+
+        let mut source = LaserstreamSource::new(self.config.clone()).await?;
+
+        // Initialize schema
+        for initializer in &self.schema_initializers {
+            initializer.initialize(self.storage.pool()).await?;
+        }
+
+        loop {
+            match source.next_batch().await {
+                Ok(events) => {
+                    if !events.is_empty() {
+                        // Process events
+                        // Laserstream (gRPC) likely provides full transaction data,
+                        // so we should leverage that to avoid RPC fetches.
+                        // For now, we reuse process_transaction_core which can handle full transactions.
+
+                        for event in events {
+                            // Clone dependencies for each task/call
+                            let fetcher = self.fetcher.clone();
+                            let decoder = self.decoder.clone();
+                            let decoder_registry = self.decoder_registry.clone();
+                            let log_decoder_registry = self.log_decoder_registry.clone();
+                            let account_decoder_registry = self.account_decoder_registry.clone();
+                            let handler_registry = self.handler_registry.clone();
+                            let storage = self.storage.clone();
+                            let config = self.config.clone();
+
+                            match event {
+                                crate::streams::TransactionEvent::Signature {
+                                    signature,
+                                    slot: _,
+                                } => {
+                                    // Fallback if full tx not available
+                                    let _ = Self::process_transaction_core(
+                                        signature,
+                                        fetcher,
+                                        decoder,
+                                        decoder_registry,
+                                        log_decoder_registry,
+                                        account_decoder_registry,
+                                        handler_registry,
+                                        storage,
+                                        config,
+                                        true, // Assuming confirmed/finalized from stream
+                                        None,
+                                        None,
+                                    )
+                                    .await;
+                                }
+                                crate::streams::TransactionEvent::FullTransaction {
+                                    signature,
+                                    slot: _,
+                                    tx,
+                                } => {
+                                    let _ = Self::process_transaction_core(
+                                        signature,
+                                        fetcher,
+                                        decoder,
+                                        decoder_registry,
+                                        log_decoder_registry,
+                                        account_decoder_registry,
+                                        handler_registry,
+                                        storage,
+                                        config,
+                                        true, // Assuming confirmed/finalized from stream
+                                        None,
+                                        Some(tx),
+                                    )
+                                    .await;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    logging::log_error("Laserstream error", &e.to_string());
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
         }
     }
 
@@ -1278,6 +1368,13 @@ impl SolanaIndexer {
                         let storage = self.storage.clone();
                         let config = self.config.clone();
 
+                        let preloaded_tx = match &event {
+                            crate::streams::TransactionEvent::FullTransaction { tx, .. } => {
+                                Some(tx.clone())
+                            }
+                            _ => None,
+                        };
+
                         // Spawn task
                         tokio::spawn(async move {
                             match Self::process_transaction_core(
@@ -1292,6 +1389,7 @@ impl SolanaIndexer {
                                 config,
                                 false, // is_finalized
                                 None,  // known_block_hash
+                                preloaded_tx,
                             )
                             .await
                             {
@@ -1386,6 +1484,7 @@ impl SolanaIndexer {
                     config,
                     false, // is_finalized
                     None,
+                    None, // preloaded_transaction
                 )
                 .await;
                 drop(permit);
@@ -1477,6 +1576,7 @@ impl SolanaIndexer {
             self.config.clone(),
             false, // Real-time polling is usually 'confirmed' so tentative
             None,
+            None, // preloaded_transaction
         )
         .await
     }
@@ -1505,11 +1605,18 @@ impl SolanaIndexer {
         config: SolanaIndexerConfig,
         is_finalized: bool,
         known_block_hash: Option<String>,
+        preloaded_transaction: Option<
+            Arc<solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta>,
+        >,
     ) -> Result<()> {
         let sig_str = signature.to_string();
 
-        // Fetch transaction
-        let transaction = fetcher.fetch_transaction(&signature).await?;
+        // Fetch transaction if not preloaded
+        let transaction = if let Some(tx) = preloaded_transaction {
+            tx
+        } else {
+            Arc::new(fetcher.fetch_transaction(&signature).await?)
+        };
 
         // Decode transaction metadata
         let decoded_meta = decoder.decode_transaction(&transaction)?;

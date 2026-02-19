@@ -7,7 +7,12 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use solana_sdk::signature::Signature;
+use solana_sdk::transaction::TransactionVersion;
+use solana_transaction_status::{
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransactionWithStatusMeta,
+};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -15,7 +20,7 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use super::TransactionSource;
 
-/// Helius WebSocket source for acquiring transaction signatures.
+/// Helius WebSocket source for acquiring transaction data.
 pub struct HeliusSource {
     receiver: mpsc::Receiver<crate::streams::TransactionEvent>,
 }
@@ -57,18 +62,22 @@ impl HeliusSource {
                     println!("Connected to Helius WS");
                     let (mut write, mut read) = ws_stream.split();
 
-                    // Subscribe to logs for the program
-                    // Reference: https://docs.helius.dev/solana-rpc-nodes/websocket-methods
+                    // Subscribe to transaction events
+                    // Reference: https://docs.helius.dev/solana-apis/enhanced-websocket-api/transaction-subscribe
                     let subscribe_msg = json!({
                         "jsonrpc": "2.0",
                         "id": 1,
-                        "method": "logsSubscribe",
+                        "method": "transactionSubscribe",
                         "params": [
                             {
-                                "mentions": program_ids
+                                "accountInclude": program_ids
                             },
                             {
-                                "commitment": "confirmed"
+                                "commitment": "confirmed",
+                                "encoding": "jsonParsed",
+                                "transactionDetails": "full",
+                                "showRewards": false,
+                                "maxSupportedTransactionVersion": 0
                             }
                         ]
                     });
@@ -82,22 +91,42 @@ impl HeliusSource {
                     while let Some(msg) = read.next().await {
                         match msg {
                             Ok(Message::Text(text)) => {
-                                // Parse keys from log notification
-                                if let Ok(HeliusLogNotification {
-                                    params: Some(params),
-                                }) = serde_json::from_str::<HeliusLogNotification>(&text)
-                                {
-                                    let signature_str = params.result.value.signature;
-                                    if let Ok(signature) = Signature::from_str(&signature_str) {
-                                        let event = crate::streams::TransactionEvent::LogEvent {
-                                            signature,
-                                            logs: params.result.value.logs,
-                                            err: params.result.value.err,
-                                            slot: params.result.context.slot,
-                                        };
-                                        if sender.send(event).await.is_err() {
-                                            return; // Receiver dropped, stop everything
+                                // Attempt to parse as notification
+                                match serde_json::from_str::<HeliusTransactionNotification>(&text) {
+                                    Ok(notification) => {
+                                        if let Some(params) = notification.params {
+                                            let result = params.result;
+                                            if let Ok(signature) =
+                                                Signature::from_str(&result.signature)
+                                            {
+                                                // Construct the full transaction object
+                                                let tx_with_meta =
+                                                    EncodedConfirmedTransactionWithStatusMeta {
+                                                        slot: result.slot,
+                                                        transaction:
+                                                            EncodedTransactionWithStatusMeta {
+                                                                transaction: result.transaction,
+                                                                meta: Some(result.meta),
+                                                                version: result.version,
+                                                            },
+                                                        block_time: result.block_time,
+                                                    };
+
+                                                let event = crate::streams::TransactionEvent::FullTransaction {
+                                                    signature,
+                                                    slot: result.slot,
+                                                    tx: Arc::new(tx_with_meta),
+                                                };
+
+                                                if sender.send(event).await.is_err() {
+                                                    return; // Receiver dropped
+                                                }
+                                            }
                                         }
+                                    }
+                                    Err(_) => {
+                                        // Ignore ping/pong or other messages for now
+                                        // Could be helpful to log debug if needed
                                     }
                                 }
                             }
@@ -153,29 +182,76 @@ impl TransactionSource for HeliusSource {
 }
 
 #[derive(Deserialize)]
-struct HeliusLogNotification {
-    params: Option<HeliusLogParams>,
+struct HeliusTransactionNotification {
+    params: Option<HeliusParams>,
 }
 
 #[derive(Deserialize)]
-struct HeliusLogParams {
-    result: HeliusLogResult,
+struct HeliusParams {
+    result: HeliusResult,
 }
 
 #[derive(Deserialize)]
-struct HeliusLogResult {
-    value: HeliusLogValue,
-    context: HeliusLogContext,
-}
-
-#[derive(Deserialize)]
-struct HeliusLogContext {
-    slot: u64,
-}
-
-#[derive(Deserialize)]
-struct HeliusLogValue {
+struct HeliusResult {
     signature: String,
-    logs: Vec<String>,
-    err: Option<serde_json::Value>,
+    slot: u64,
+    #[serde(default)]
+    block_time: Option<i64>,
+    transaction: solana_transaction_status::EncodedTransaction,
+    meta: solana_transaction_status::UiTransactionStatusMeta,
+    #[serde(default)]
+    version: Option<TransactionVersion>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_helius_notification() {
+        let json_data = r#"
+        {
+            "params": {
+                "result": {
+                    "signature": "5h6x",
+                    "slot": 12345,
+                    "transaction": {
+                        "signatures": ["5h6x"],
+                        "message": {
+                            "accountKeys": [],
+                            "header": {
+                                "numReadonlySignedAccounts": 0,
+                                "numReadonlyUnsignedAccounts": 0,
+                                "numRequiredSignatures": 1
+                            },
+                            "instructions": [],
+                            "recentBlockhash": "11111111111111111111111111111111"
+                        }
+                    },
+                    "meta": {
+                        "err": null,
+                        "fee": 5000,
+                        "preBalances": [],
+                        "postBalances": [],
+                        "innerInstructions": [],
+                        "logMessages": [],
+                        "preTokenBalances": [],
+                        "postTokenBalances": [],
+                        "rewards": [],
+                        "status": {"Ok": null}
+                    },
+                    "blockTime": 1678900000,
+                    "version": 0
+                }
+            }
+        }
+        "#;
+
+        let notification: HeliusTransactionNotification =
+            serde_json::from_str(json_data).expect("Failed to parse");
+        let result = notification.params.unwrap().result;
+        assert_eq!(result.slot, 12345);
+        assert_eq!(result.signature, "5h6x");
+        assert_eq!(result.version, Some(TransactionVersion::Number(0)));
+    }
 }

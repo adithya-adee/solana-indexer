@@ -619,6 +619,7 @@ impl BackfillEngine {
                                         config,
                                         true, // is_finalized
                                         Some(blk_hash),
+                                        None, // preloaded_transaction
                                     )
                                     .await;
                                     drop(permit);

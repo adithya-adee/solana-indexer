@@ -21,6 +21,12 @@ pub enum TransactionEvent {
         err: Option<serde_json::Value>,
         slot: u64,
     },
+    /// A full transaction with metadata (e.g., from Helius transactionSubscribe)
+    FullTransaction {
+        signature: Signature,
+        slot: u64,
+        tx: std::sync::Arc<solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta>,
+    },
 }
 
 impl TransactionEvent {
@@ -29,6 +35,7 @@ impl TransactionEvent {
         match self {
             TransactionEvent::Signature { signature, .. } => *signature,
             TransactionEvent::LogEvent { signature, .. } => *signature,
+            TransactionEvent::FullTransaction { signature, .. } => *signature,
         }
     }
 
@@ -37,6 +44,7 @@ impl TransactionEvent {
         match self {
             TransactionEvent::Signature { slot, .. } => *slot,
             TransactionEvent::LogEvent { slot, .. } => *slot,
+            TransactionEvent::FullTransaction { slot, .. } => *slot,
         }
     }
 }
@@ -64,5 +72,6 @@ pub trait TransactionSource: Send + Sync {
 
 pub mod helius;
 pub mod hybrid;
+pub mod laserstream;
 pub mod poller;
 pub mod websocket;
