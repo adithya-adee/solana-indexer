@@ -17,14 +17,25 @@ fn main() {
 
             println!("cargo:warning=Generating types from IDL: {:?}", idl_path);
 
-            solana_indexer_idl::generate_sdk_types(&idl_path, &generated_path)
-                .expect("Failed to generate types from IDL");
+            #[cfg(feature = "idl-build")]
+            {
+                solana_indexer_idl::generate_sdk_types(&idl_path, &generated_path)
+                    .expect("Failed to generate types from IDL");
 
-            println!("cargo:rerun-if-changed={}", idl_path.display());
-            println!(
-                "cargo:warning=Generated types written to: {:?}",
-                generated_path
-            );
+                println!("cargo:rerun-if-changed={}", idl_path.display());
+                println!(
+                    "cargo:warning=Generated types written to: {:?}",
+                    generated_path
+                );
+            }
+            #[cfg(not(feature = "idl-build"))]
+            {
+                println!("cargo:warning=IDL parsing skipped because 'idl-build' feature is not enabled. If you need IDL types, add `features = [\"idl-build\"]` to your Cargo.toml for `solana-indexer-sdk`.");
+
+                // Write an empty file so the module doesn't break if included
+                std::fs::write(&generated_path, "// IDL generation disabled\n")
+                    .expect("Failed to write empty generated types file");
+            }
         } else {
             println!(
                 "cargo:warning=IDL_PATH was set to {:?}, but the file does not exist.",

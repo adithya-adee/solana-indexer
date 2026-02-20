@@ -70,8 +70,12 @@ pub trait TransactionSource: Send + Sync {
     fn source_name(&self) -> &str;
 }
 
+#[cfg(feature = "helius")]
 pub mod helius;
+#[cfg(feature = "websockets")]
 pub mod hybrid;
+#[cfg(feature = "laserstream")]
 pub mod laserstream;
 pub mod poller;
+#[cfg(feature = "websockets")]
 pub mod websocket;

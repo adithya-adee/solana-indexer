@@ -13,7 +13,7 @@ use crate::{
         registry::DecoderRegistry,
     },
     storage::{Storage, StorageBackend},
-    streams::{helius::HeliusSource, websocket::WebSocketSource, TransactionSource},
+    streams::TransactionSource,
     types::{
         backfill_traits::{
             BackfillHandlerRegistry, BackfillRange, BackfillTrigger, FinalizedBlockTracker,
@@ -26,6 +26,12 @@ use crate::{
         logging,
     },
 };
+
+#[cfg(feature = "helius")]
+use crate::streams::helius::HeliusSource;
+
+#[cfg(feature = "websockets")]
+use crate::streams::websocket::WebSocketSource;
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -686,7 +692,9 @@ impl SolanaIndexer {
 
         match &self.config.source {
             SourceConfig::Rpc { .. } => self.process_rpc_source().await,
+            #[cfg(feature = "websockets")]
             SourceConfig::WebSocket { .. } => self.process_websocket_source().await,
+            #[cfg(feature = "helius")]
             SourceConfig::Helius { use_websocket, .. } => {
                 if *use_websocket {
                     self.process_helius_source().await
@@ -694,12 +702,15 @@ impl SolanaIndexer {
                     self.process_rpc_source().await
                 }
             }
+            #[cfg(feature = "websockets")]
             SourceConfig::Hybrid { .. } => self.process_hybrid_source().await,
+            #[cfg(feature = "laserstream")]
             SourceConfig::Laserstream { .. } => self.process_laserstream_source().await,
         }
     }
 
     /// Internal method to run the Laserstream (gRPC) source loop.
+    #[cfg(feature = "laserstream")]
     async fn process_laserstream_source(self) -> Result<()> {
         use crate::streams::laserstream::LaserstreamSource;
 
@@ -910,6 +921,7 @@ impl SolanaIndexer {
     }
 
     /// Internal method to run the WebSocket subscription loop.
+    #[cfg(feature = "websockets")]
     async fn process_websocket_source(self) -> Result<()> {
         // Display startup banner
         logging::log_startup(
@@ -1066,6 +1078,7 @@ impl SolanaIndexer {
         Ok(())
     }
 
+    #[cfg(feature = "websockets")]
     async fn process_hybrid_source(self) -> Result<()> {
         logging::log_startup(
             &self
@@ -1237,6 +1250,7 @@ impl SolanaIndexer {
         Ok(())
     }
 
+    #[cfg(feature = "helius")]
     async fn process_helius_source(self) -> Result<()> {
         logging::log_startup(
             &self

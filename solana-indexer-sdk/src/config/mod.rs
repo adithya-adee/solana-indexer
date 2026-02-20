@@ -107,9 +107,12 @@ impl SolanaIndexerConfig {
     #[must_use]
     pub fn rpc_url(&self) -> &str {
         match &self.source {
-            SourceConfig::Rpc { rpc_url, .. }
-            | SourceConfig::WebSocket { rpc_url, .. }
-            | SourceConfig::Hybrid { rpc_url, .. } => rpc_url,
+            SourceConfig::Rpc { rpc_url, .. } => rpc_url,
+            #[cfg(feature = "websockets")]
+            SourceConfig::WebSocket { rpc_url, .. } | SourceConfig::Hybrid { rpc_url, .. } => {
+                rpc_url
+            }
+            #[cfg(feature = "helius")]
             SourceConfig::Helius {
                 api_key, network, ..
             } => {
@@ -120,12 +123,14 @@ impl SolanaIndexerConfig {
                 };
                 Box::leak(format!("{base_url}?api-key={api_key}").into_boxed_str())
             }
+            #[cfg(feature = "laserstream")]
             SourceConfig::Laserstream { grpc_url, .. } => grpc_url,
         }
     }
 
     /// Helper to get the Helius WebSocket URL, if Helius source is configured.
     #[must_use]
+    #[cfg(feature = "helius")]
     pub fn helius_ws_url(&self) -> Option<&str> {
         match &self.source {
             SourceConfig::Helius {
@@ -140,6 +145,8 @@ impl SolanaIndexerConfig {
                     format!("{base_url}?api-key={api_key}").into_boxed_str(),
                 ))
             }
+            // _ is unreachable when only Rpc and Helius exist, but we still need a fallback for other optional configs
+            #[allow(unreachable_patterns)]
             _ => None,
         }
     }
@@ -155,12 +162,14 @@ pub enum SourceConfig {
         batch_size: usize,
     },
     /// WebSocket source with RPC fallback
+    #[cfg(feature = "websockets")]
     WebSocket {
         ws_url: String,
         rpc_url: String,
         reconnect_delay_secs: u64,
     },
     /// Helius-specific source
+    #[cfg(feature = "helius")]
     Helius {
         api_key: String,
         network: HeliusNetwork,
@@ -168,6 +177,7 @@ pub enum SourceConfig {
         reconnect_delay_secs: u64,
     },
     /// Hybrid source with WebSocket for real-time and RPC for gap filling
+    #[cfg(feature = "websockets")]
     Hybrid {
         ws_url: String,
         rpc_url: String,
@@ -176,6 +186,7 @@ pub enum SourceConfig {
         gap_threshold_slots: u64,
     },
     /// Laserstream (Yellowstone gRPC) source
+    #[cfg(feature = "laserstream")]
     Laserstream {
         grpc_url: String,
         x_token: Option<String>,
@@ -395,6 +406,7 @@ impl SolanaIndexerConfigBuilder {
     ///     .with_ws("ws://127.0.0.1:8900", "http://127.0.0.1:8899");
     /// ```
     #[must_use]
+    #[cfg(feature = "websockets")]
     pub fn with_ws(mut self, ws_url: impl Into<String>, rpc_url: impl Into<String>) -> Self {
         self.source = Some(SourceConfig::WebSocket {
             ws_url: ws_url.into(),
@@ -411,6 +423,7 @@ impl SolanaIndexerConfigBuilder {
     /// * `api_key` - The Helius API key
     /// * `use_websocket` - Whether to use WebSocket (true) or RPC polling only (false)
     #[must_use]
+    #[cfg(feature = "helius")]
     pub fn with_helius(mut self, api_key: impl Into<String>, use_websocket: bool) -> Self {
         self.source = Some(SourceConfig::Helius {
             api_key: api_key.into(),
@@ -429,6 +442,7 @@ impl SolanaIndexerConfigBuilder {
     /// * `network` - The Helius network (Mainnet or Devnet)
     /// * `use_websocket` - Whether to use WebSocket (true) or RPC polling only (false)
     #[must_use]
+    #[cfg(feature = "helius")]
     pub fn with_helius_network(
         mut self,
         api_key: impl Into<String>,
@@ -451,6 +465,7 @@ impl SolanaIndexerConfigBuilder {
     /// * `grpc_url` - The gRPC endpoint URL
     /// * `x_token` - Optional authentication token (e.g., Helius API key)
     #[must_use]
+    #[cfg(feature = "laserstream")]
     pub fn with_laserstream(
         mut self,
         grpc_url: impl Into<String>,
@@ -682,6 +697,7 @@ impl SolanaIndexerConfigBuilder {
     ///
     /// Returns `SolanaIndexerError::ConfigError` if:
     /// Set the source to a Hybrid configuration (WebSocket + RPC polling).
+    #[cfg(feature = "websockets")]
     pub fn with_hybrid(
         mut self,
         ws_url: impl Into<String>,
@@ -828,6 +844,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "websockets")]
     fn test_builder_websocket_config() -> Result<()> {
         let config = SolanaIndexerConfigBuilder::new()
             .with_ws("ws://127.0.0.1:8900", "http://127.0.0.1:8899")
@@ -848,6 +865,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "helius")]
     fn test_builder_helius_config() -> Result<()> {
         let config = SolanaIndexerConfigBuilder::new()
             .with_helius("test-api-key", true)
@@ -882,7 +900,8 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_helius_devnet_config() -> Result<()> {
+    #[cfg(feature = "helius")]
+    fn test_builder_helius_network_config() -> Result<()> {
         let config = SolanaIndexerConfigBuilder::new()
             .with_helius_network("test-api-key", HeliusNetwork::Devnet, true)
             .with_database("postgresql://localhost/db")
