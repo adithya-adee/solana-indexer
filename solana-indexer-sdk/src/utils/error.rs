@@ -67,6 +67,14 @@ pub enum SolanaIndexerError {
     /// Error when a registry exceeds its configured capacity.
     #[error("Registry capacity exceeded: {0}")]
     RegistryCapacityExceeded(String),
+
+    /// Connection error (e.g. gRPC or WebSocket failure)
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+
+    /// Invalid data error
+    #[error("Data error: {0}")]
+    DataError(String),
 }
 
 /// Type alias for Results using `SolanaIndexerError`.

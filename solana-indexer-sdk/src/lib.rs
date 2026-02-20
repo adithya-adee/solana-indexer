@@ -8,7 +8,7 @@
 //!
 //! ## Features
 //!
-//! - **Multiple Data Sources**: Ingest data via RPC polling, WebSocket subscriptions, or from Helius.
+//! - **Multiple Data Sources**: Ingest data via RPC polling, WebSocket subscriptions, Helius Enhanced RPC, or Laserstream (Yellowstone gRPC).
 //! - **Automatic Indexing Modes**: The indexer automatically detects which on-chain data to process (instructions, logs, or account states) based on the decoders you register.
 //! - **Dynamic Backfill**: Automatically detects when the indexer is behind the chain tip and backfills historical data concurrently with live indexing.
 //! - **Simple Handler Pattern**: Implement the `EventHandler` trait to add your custom business logic (e.g., writing to a database).

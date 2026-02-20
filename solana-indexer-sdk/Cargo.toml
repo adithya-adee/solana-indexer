@@ -1,6 +1,6 @@
 [package]
 name = "solana-indexer-sdk"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 description = "A developer-centric SDK for Solana blockchain data indexing"
@@ -32,9 +32,15 @@ tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 rayon = "1.11.0"
 log = "0.4.29"
 tokio-util = { version = "0.7.18", features = ["full"] }
+tonic = { version = "0.10", features = ["tls", "tls-roots"] }
+yellowstone-grpc-proto = "1.14.0"
+prost = "0.12"
+bs58 = "0.5"
+solana-account-decoder = "1.18.26"
+bincode = "1.3"
 
 [build-dependencies]
-solana-idl-parser = { path = "../solana-idl-parser" }
+solana-idl-parser = { path = "../solana-idl-parser", version = "0.1.0" }
 
 [dev-dependencies]
 honggfuzz = "0.5"

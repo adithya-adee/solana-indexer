@@ -24,7 +24,13 @@ This separation of concerns allows developers to build indexers for any use case
 │  │  (RPC)   │   │  Subscriber  │   │  Gap-filling backstop    │ │
 │  └────┬─────┘   └──────┬───────┘   └───────────┬──────────────┘ │
 │       │                │                        │                │
-└───────┴────────────────┴────────────────────────┘                │
+│       │                │                        │                │
+│       │                │          ┌─────────────┴─────────────┐  │
+│       │                │          │        Laserstream        │  │
+│       │                │          │      (Yellowstone gRPC)   │  │
+│       │                │          └─────────────┬─────────────┘  │
+│       │                │                        │                │
+└───────┴────────────────┴────────────────────────┴────────────────┘
                          │                                          
                          ▼                                          
               ┌──────────────────────┐                              
@@ -65,6 +71,7 @@ This separation of concerns allows developers to build indexers for any use case
    - **WebSocket Subscriber:** Real-time notifications via `programSubscribe`. Essential for low-latency production environments.
    - **Hybrid (Dual-Stream):** Combines WebSocket speed with RPC polling reliability. Uses WS for real-time events and a background poller for gap-filling.
    - **Helius Enhanced RPC:** Integration with Helius RPC endpoints for enhanced reliability, historical data, and optimized polling.
+   - **Laserstream (Yellowstone gRPC):** High-throughput, low-latency streaming of transactions and blocks directly from validator Geyser plugins. Ideal for heavy backfill and real-time ingestion.
 2. **Parallel Fetcher:** Retrieves full transaction details concurrently using a bounded worker pool (`tokio::spawn` + semaphore).
 3. **Backfill Engine:** Manages historical data indexing with configurable depth, batch sizes, and slot-based tracking.
 4. **Idempotency Tracker:** Checks `_solana_indexer_sdk_processed` and `_solana_indexer_sdk_tentative` tables to prevent re-processing.
@@ -117,6 +124,7 @@ indexer.start().await?;
 | **WebSocket** | Real-time `programSubscribe` | Low-latency production | `.with_ws(...)` |
 | **Hybrid** | WS + background RPC gap-filling | Production (speed + completeness) | `.with_hybrid(...)` |
 | **Helius Enhanced** | Helius RPC APIs | Enhanced reliability + historical data | `.with_helius(...)` |
+| **Laserstream** | Yellowstone gRPC | High throughput & backfill | `.with_laserstream(...)` |
 
 ---
 
@@ -303,7 +311,7 @@ solana-indexer/
 ### Step 1: Add Dependency
 ```toml
 [dependencies]
-solana-indexer-sdk = "0.1"
+solana-indexer-sdk = "0.2"
 ```
 
 ### Step 2: Define Event + Decoder + Handler
@@ -364,7 +372,7 @@ async fn main() -> Result<()> {
 
 ## 11. Completed Features & Roadmap
 
-### ✅ Completed (v0.1.0)
+### ✅ Completed (v0.2.0)
 
 | Feature | Status |
 |:---|:---|
@@ -386,12 +394,12 @@ async fn main() -> Result<()> {
 | Criterion Benchmarks (decoder, storage, throughput) | ✅ |
 | Integration Test Suite | ✅ |
 | 11 Working Examples (Jupiter, Raydium, SPL, etc.) | ✅ |
+| **Yellowstone gRPC Streaming (Laserstream)** | ✅ |
 
-### 🚀 Roadmap (v0.2.0+)
+### 🚀 Roadmap (v0.3.0+)
 
 | Feature | Priority | Description |
 |:---|:---|:---|
-| **Yellowstone gRPC Streaming** | 🔴 High | Sub-50ms latency via Geyser plugin integration |
 | **crates.io Release** | 🔴 High | Publish to crates.io for ecosystem adoption |
 | **Configurable Retry Logic** | 🟡 Medium | Exponential backoff for transient RPC failures |
 | **Dead-Letter Queue** | 🟡 Medium | Capture events that fail after all retries |

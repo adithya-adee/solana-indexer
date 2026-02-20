@@ -120,6 +120,7 @@ impl SolanaIndexerConfig {
                 };
                 Box::leak(format!("{base_url}?api-key={api_key}").into_boxed_str())
             }
+            SourceConfig::Laserstream { grpc_url, .. } => grpc_url,
         }
     }
 
@@ -173,6 +174,12 @@ pub enum SourceConfig {
         poll_interval_secs: u64,
         reconnect_delay_secs: u64,
         gap_threshold_slots: u64,
+    },
+    /// Laserstream (Yellowstone gRPC) source
+    Laserstream {
+        grpc_url: String,
+        x_token: Option<String>,
+        reconnect_delay_secs: u64,
     },
 }
 
@@ -432,6 +439,26 @@ impl SolanaIndexerConfigBuilder {
             api_key: api_key.into(),
             network,
             use_websocket,
+            reconnect_delay_secs: 5,
+        });
+        self
+    }
+
+    /// Sets the Laserstream (Yellowstone gRPC) source.
+    ///
+    /// # Arguments
+    ///
+    /// * `grpc_url` - The gRPC endpoint URL
+    /// * `x_token` - Optional authentication token (e.g., Helius API key)
+    #[must_use]
+    pub fn with_laserstream(
+        mut self,
+        grpc_url: impl Into<String>,
+        x_token: Option<String>,
+    ) -> Self {
+        self.source = Some(SourceConfig::Laserstream {
+            grpc_url: grpc_url.into(),
+            x_token,
             reconnect_delay_secs: 5,
         });
         self
