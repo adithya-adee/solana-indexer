@@ -171,8 +171,8 @@ impl Poller {
         let fetcher = Fetcher::new(self.config.rpc_url(), self.config.commitment_level.into());
         let decoder = Decoder::new();
 
-        println!("Starting poller with RPC: {}", self.config.rpc_url());
-        println!(
+        tracing::info!("Starting poller with RPC: {}", self.config.rpc_url());
+        tracing::info!(
             "Monitoring programs: {}",
             self.config
                 .program_ids
@@ -188,7 +188,7 @@ impl Poller {
             match self.fetch_new_signatures().await {
                 Ok(signatures) => {
                     if !signatures.is_empty() {
-                        println!("Fetched {} new signatures", signatures.len());
+                        tracing::info!("Fetched {} new signatures", signatures.len());
 
                         // Process each signature through the pipeline
                         for signature in &signatures {
@@ -197,10 +197,12 @@ impl Poller {
                                 .await
                             {
                                 Ok(()) => {
-                                    println!("✓ Processed transaction: {signature}");
+                                    tracing::info!("✓ Processed transaction: {signature}");
                                 }
                                 Err(e) => {
-                                    eprintln!("✗ Error processing transaction {signature}: {e}");
+                                    tracing::error!(
+                                        "✗ Error processing transaction {signature}: {e}"
+                                    );
                                     // Continue processing other transactions
                                 }
                             }
@@ -209,10 +211,10 @@ impl Poller {
                 }
                 Err(e) => {
                     if let SolanaIndexerError::RpcError(ref msg) = e {
-                        eprintln!("RPC failure in poller (Exiting): {msg}");
+                        tracing::error!("RPC failure in poller (Exiting): {msg}");
                         return Err(e);
                     }
-                    eprintln!("Error fetching signatures: {e}");
+                    tracing::error!("Error fetching signatures: {e}");
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
@@ -243,27 +245,29 @@ impl Poller {
         let decoded_tx = decoder.decode_transaction(&transaction)?;
 
         // Log decoded information
-        println!("  Slot: {}", decoded_tx.slot);
-        println!("  Instructions: {}", decoded_tx.instructions.len());
-        println!("  Events: {}", decoded_tx.events.len());
+        tracing::debug!("  Slot: {}", decoded_tx.slot);
+        tracing::debug!("  Instructions: {}", decoded_tx.instructions.len());
+        tracing::debug!("  Events: {}", decoded_tx.events.len());
 
         if let Some(compute_units) = decoded_tx.compute_units_consumed {
-            println!("  Compute units: {compute_units}");
+            tracing::debug!("  Compute units: {compute_units}");
         }
 
         // Display instruction details
         for instruction in &decoded_tx.instructions {
-            println!(
+            tracing::debug!(
                 "    - Instruction {}: {} ({})",
-                instruction.index, instruction.instruction_type, instruction.program_id
+                instruction.index,
+                instruction.instruction_type,
+                instruction.program_id
             );
         }
 
         // Display event details
         for event in &decoded_tx.events {
-            println!("    - Event: {:?}", event.event_type);
+            tracing::debug!("    - Event: {:?}", event.event_type);
             if let Some(data) = &event.data {
-                println!("      Data: {data}");
+                tracing::debug!("      Data: {data}");
             }
         }
 

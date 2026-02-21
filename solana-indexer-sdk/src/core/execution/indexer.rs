@@ -480,6 +480,7 @@ impl SolanaIndexer {
     ///
     /// This runs the backfill engine until complete or error.
     /// It respects the configuration provided in `BackfillConfig`.
+    #[tracing::instrument(skip(self))]
     pub async fn start_backfill(&self) -> Result<()> {
         if !self.config.backfill.enabled {
             logging::log(logging::LogLevel::Info, "Backfill is checking config...");
@@ -539,6 +540,7 @@ impl SolanaIndexer {
     /// - `from_slot` (inclusive): the starting slot to backfill from.
     /// - `to_slot` (inclusive, optional): the ending slot to backfill to. If `None`,
     ///   the latest finalized slot will be used.
+    #[tracing::instrument(skip(self))]
     pub async fn backfill_slots(&self, from_slot: u64, to_slot: Option<u64>) -> Result<()> {
         // Resolve the target end slot if not provided explicitly.
         let finalized_tracker = Arc::new(DefaultFinalizedBlockTracker);
@@ -604,6 +606,7 @@ impl SolanaIndexer {
     /// - Database operations fail
     /// - RPC/WebSocket connection fails
     /// - Decoding errors occur
+    #[tracing::instrument(skip(self))]
     pub async fn start(self) -> Result<()> {
         let token = self.cancellation_token.clone();
 
@@ -1608,6 +1611,7 @@ impl SolanaIndexer {
 
     /// Static implementation of transaction processing to allow concurrent execution.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(skip_all, fields(signature = %signature))]
     pub(crate) async fn process_transaction_core(
         signature: Signature,
         fetcher: Arc<Fetcher>,
