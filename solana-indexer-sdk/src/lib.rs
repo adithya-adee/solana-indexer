@@ -167,12 +167,18 @@ pub use utils::macros::{
 // IDL module is available for documentation purposes
 // Use solana_indexer_idl::generate_sdk_types in build.rs scripts
 
+// Telemetry exports
+#[cfg(feature = "telemetry")]
+pub use telemetry::{init_telemetry, shutdown_telemetry, TelemetryConfig};
+
 // Module declarations
 pub mod config;
 pub mod core;
 pub mod idl;
 pub mod storage;
 pub mod streams;
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
 pub mod types;
 pub mod utils;
 

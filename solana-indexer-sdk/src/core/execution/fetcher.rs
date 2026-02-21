@@ -146,7 +146,7 @@ impl Fetcher {
 
                     // Simple backoff: 100ms * 2^attempt
                     let backoff = std::time::Duration::from_millis(100 * (1 << attempt));
-                    eprintln!(
+                    tracing::warn!(
                         "⚠️ Fetch failed for {sig} (Attempt {attempt}/{max_retries}): {e}. Retrying in {:?}...",
                         backoff
                     );
@@ -383,7 +383,7 @@ impl Fetcher {
                     }
 
                     let backoff = std::time::Duration::from_millis(100 * (1 << attempt));
-                    log::warn!(
+                    tracing::warn!(
                         "⚠️ Fetch block failed for {slot} (Attempt {attempt}/{max_retries}): {e}. Retrying...",
                     );
                     tokio::time::sleep(backoff).await;

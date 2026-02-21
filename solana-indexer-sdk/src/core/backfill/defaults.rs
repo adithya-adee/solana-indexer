@@ -80,7 +80,7 @@ impl ReorgHandler for DefaultReorgHandler {
     }
 
     async fn handle_reorg(&self, event: ReorgEvent, storage: &dyn StorageBackend) -> Result<()> {
-        log::warn!(
+        tracing::warn!(
             "Reorg detected at slot {}: {} -> {}",
             event.slot,
             event.previous_hash,
@@ -119,7 +119,7 @@ impl FinalizedBlockTracker for DefaultFinalizedBlockTracker {
         block_hash: &str,
         storage: &dyn StorageBackend,
     ) -> Result<()> {
-        log::debug!(
+        tracing::debug!(
             "Marking slot {} as finalized with hash {}",
             slot,
             block_hash

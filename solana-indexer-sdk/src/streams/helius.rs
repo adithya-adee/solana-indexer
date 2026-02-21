@@ -56,10 +56,10 @@ impl HeliusSource {
         sender: mpsc::Sender<crate::streams::TransactionEvent>,
     ) {
         loop {
-            println!("Connecting to Helius WS: {}", ws_url);
+            tracing::info!("Connecting to Helius WS: {}", ws_url);
             match connect_async(&ws_url).await {
                 Ok((ws_stream, _)) => {
-                    println!("Connected to Helius WS");
+                    tracing::info!("Connected to Helius WS");
                     let (mut write, mut read) = ws_stream.split();
 
                     // Subscribe to transaction events
@@ -83,7 +83,7 @@ impl HeliusSource {
                     });
 
                     if let Err(e) = write.send(Message::Text(subscribe_msg.to_string())).await {
-                        eprintln!("Failed to send subscribe message: {}", e);
+                        tracing::error!("Failed to send subscribe message: {}", e);
                         sleep(Duration::from_secs(5)).await;
                         continue;
                     }
@@ -132,7 +132,7 @@ impl HeliusSource {
                             }
                             Ok(Message::Close(_)) => break,
                             Err(e) => {
-                                eprintln!("WS error: {}", e);
+                                tracing::error!("WS error: {}", e);
                                 break;
                             }
                             _ => {}
@@ -140,12 +140,12 @@ impl HeliusSource {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to connect to Helius WS: {}", e);
+                    tracing::error!("Failed to connect to Helius WS: {}", e);
                 }
             }
 
             // Reconnect strategy
-            println!("Reconnecting to Helius WS in 5 seconds...");
+            tracing::info!("Reconnecting to Helius WS in 5 seconds...");
             sleep(Duration::from_secs(5)).await;
         }
     }
