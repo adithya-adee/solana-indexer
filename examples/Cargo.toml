@@ -28,9 +28,6 @@ solana-indexer-idl = { path = "../solana-indexer-idl" }
 name = "account_indexer"
 path = "account_indexer.rs"
 
-[[example]]
-name = "backfill_indexer"
-path = "backfill_indexer.rs"
 
 [[example]]
 name = "generator_spl_transfer"
@@ -60,17 +57,11 @@ path = "rpc_spl_token.rs"
 name = "rpc_system_transfer"
 path = "rpc_system_transfer.rs"
 
-[[example]]
-name = "verify_shutdown"
-path = "verify_shutdown.rs"
 
 [[example]]
 name = "ws_system_transfer"
 path = "ws_system_transfer.rs"
 
-[[example]]
-name = "multi_program_indexer_2"
-path = "multi_program_indexer_2.rs"
 
 [[example]]
 name = "idl_indexer"
