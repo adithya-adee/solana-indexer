@@ -1903,12 +1903,14 @@ mod tests {
         assert_eq!(config.rpc_url(), "http://127.0.0.1:8899");
         match config.source {
             SourceConfig::Rpc { .. } => {}
+            #[allow(unreachable_patterns)]
             _ => panic!("Expected RPC source"),
         }
         Ok(())
     }
 
     #[tokio::test]
+    #[cfg(feature = "websockets")]
     async fn test_indexer_creation_ws() -> Result<()> {
         let config = SolanaIndexerConfigBuilder::new()
             .with_ws("ws://127.0.0.1:8900", "http://127.0.0.1:8899")

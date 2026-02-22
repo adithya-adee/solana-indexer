@@ -6,7 +6,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-solana-indexer-sdk = { path = "../solana-indexer-sdk", features = ["websockets", "helius", "laserstream", "idl-build"] }
+solana-indexer-sdk = { path = "../solana-indexer-sdk", features = ["websockets", "helius", "laserstream", "idl-build", "opentelemetry"] }
 tokio = { version = "1", features = ["full"] }
 dotenvy = "0.15"
 solana-sdk = "1.18.26"
@@ -18,6 +18,7 @@ solana-client = "1.18.26"
 serde_json = "1.0.82"
 bs58 = "0.5.0"
 sha2 = "0.10"
+tracing = "0.1"
 
 [build-dependencies]
 solana-indexer-idl = { path = "../solana-indexer-idl" }
@@ -74,3 +75,15 @@ path = "multi_program_indexer_2.rs"
 [[example]]
 name = "idl_indexer"
 path = "idl_indexer.rs"
+
+[[example]]
+name = "otel_indexer"
+path = "otel_indexer.rs"
+# This example requires the opentelemetry feature because it calls
+# init_telemetry_with_otel and uses OtelConfig / OtlpProtocol.
+required-features = ["solana-indexer-sdk/opentelemetry"]
+
+[[example]]
+name = "otel_laserstream_indexer"
+path = "otel_laserstream_indexer.rs"
+required-features = ["solana-indexer-sdk/opentelemetry", "solana-indexer-sdk/laserstream"]

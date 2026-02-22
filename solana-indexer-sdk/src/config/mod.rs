@@ -838,6 +838,7 @@ mod tests {
                 assert_eq!(poll_interval_secs, 5);
                 assert_eq!(batch_size, 100);
             }
+            #[allow(unreachable_patterns)]
             _ => panic!("Expected RPC source"),
         }
         Ok(())
