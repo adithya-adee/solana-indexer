@@ -6,14 +6,14 @@
 //!
 //! # Quick Start
 //!
-//! **1. Start Jaeger (OTLP collector + UI)**
+//! **1. Start Grafana Tempo (OTLP collector + UI)**
 //! ```sh
-//! docker run -d --name jaeger \
-//!   -e COLLECTOR_OTLP_ENABLED=true \
-//!   -p 16686:16686 \
-//!   -p 4317:4317 \
-//!   jaegertracing/all-in-one:latest
+//! cd examples/observability
+//! docker-compose up -d
 //! ```
+//! This will spin up:
+//! - **Grafana** at `http://localhost:3000`
+//! - **Tempo** tracing backend listening on `4317`
 //!
 //! **2. Configure environment** (`examples/.env`)
 //! ```dotenv
@@ -27,7 +27,7 @@
 //! cargo run --example otel_indexer --features opentelemetry
 //! ```
 //!
-//! **4. View traces** at `http://localhost:16686` → service `solana-sol-transfer-indexer`
+//! **4. View traces** at `http://localhost:3000` → Explore → Tempo → Service: `solana-sol-transfer-indexer`
 //!
 //! # Architecture
 //!
@@ -36,7 +36,9 @@
 //!                │                                   │
 //!           BackfillManager                    OTel Span (handle_transfer)
 //!          (fills history)                          │
-//!                                           OTLP gRPC exporter ──► Jaeger
+//!                                           OTLP gRPC exporter ──► Tempo
+//!                                                                    │
+//!                                                                 Grafana
 //! ```
 //!
 //! # Rate Limit Notes
@@ -229,6 +231,62 @@ impl solana_indexer_sdk::types::backfill_traits::BackfillHandler<SolTransfer>
     }
 }
 
+// ── Backfill Trigger ──────────────────────────────────────────────────────────
+
+/// A custom trigger that ensures we only backfill exactly what we asked for,
+/// even across restarts, and prevents the indexer from looping infinitely
+/// over the same range once it is finished.
+pub struct CustomBackfillTrigger {
+    pub start_slot: u64,
+    pub end_slot: u64,
+}
+
+#[async_trait]
+impl solana_indexer_sdk::types::backfill_traits::BackfillTrigger for CustomBackfillTrigger {
+    async fn next_range(
+        &self,
+        ctx: &solana_indexer_sdk::types::backfill_traits::BackfillContext,
+        _storage: &dyn solana_indexer_sdk::storage::StorageBackend,
+    ) -> Result<Option<solana_indexer_sdk::types::backfill_traits::BackfillRange>, SolanaIndexerError>
+    {
+        // If the database has already progressed to or past our end_slot, we are done.
+        // Returning None stops the backfiller from fetching this range again.
+        if let Some(last) = ctx.last_backfilled_slot {
+            if last >= self.end_slot {
+                return Ok(None);
+            }
+        }
+
+        // Determine actual start slot.
+        // We prioritize our requested start_slot, but if the database has explicitly
+        // made some progress WITHIN our requested range, we resume from there.
+        let mut actual_start = self.start_slot;
+        if let Some(last) = ctx.last_backfilled_slot {
+            if last >= self.start_slot && last < self.end_slot {
+                actual_start = last + 1;
+            }
+        }
+
+        if actual_start > self.end_slot {
+            return Ok(None);
+        }
+
+        // Chunk sizes to avoid overloading memory and RPC
+        let mut actual_end = self.end_slot;
+        let chunk_size = 10_000;
+        if actual_end - actual_start > chunk_size {
+            actual_end = actual_start + chunk_size;
+        }
+
+        Ok(Some(
+            solana_indexer_sdk::types::backfill_traits::BackfillRange::new(
+                actual_start,
+                actual_end,
+            ),
+        ))
+    }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -317,6 +375,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     indexer.register_decoder("system", SolTransferDecoder)?;
     indexer.register_handler(SolTransferHandler)?;
     indexer.register_backfill_handler(SolTransferHandler)?;
+    indexer.with_backfill_trigger(std::sync::Arc::new(CustomBackfillTrigger {
+        start_slot: backfill_start,
+        end_slot: latest_slot,
+    }))?;
 
     // ── Run ───────────────────────────────────────────────────────────────────
 

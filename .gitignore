@@ -6,3 +6,13 @@ TODO.md
 hfuzz_**
 examples/idl
 *.log.txt
+
+# Temp Observability Tester
+obs_tester/
+
+# Temp Observability Data
+tempo-data/
+prom-data/
+
+# Temp Observability Config
+tempo-test.yaml
