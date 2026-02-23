@@ -43,6 +43,7 @@ Initialize the `SolanaIndexer` with a `SolanaIndexerConfig` (built via `SolanaIn
 | **Advanced** | [account_indexer.rs](./account_indexer.rs) | Indexing account state changes (Crank-based) instead of instructions. |
 | | [backfill_indexer.rs](./backfill_indexer.rs) | Historical data indexing with reorg protection. |
 | | [multi_program_indexer.rs](./multi_program_indexer.rs) | Running multiple indexing pipelines in one process with shared storage. |
+| **Observability** | [otel_indexer.rs](./otel_indexer.rs) | Tracing context and generating performance spans using OpenTelemetry, Tempo, Prometheus, and Grafana (see `observability/`). |
 | **DEX/DeFi** | [raydium_indexer.rs](./raydium_indexer.rs) | Parsing partially decoded instructions from the Raydium AMM. |
 | | [jupiter_swap_indexer.rs](./jupiter_swap_indexer.rs) | Event-based indexing for Jupiter aggregator swaps. |
 | **Utilities** | [generator_spl_transfer.rs](./generator_spl_transfer.rs) | Test data generator for local development. |
