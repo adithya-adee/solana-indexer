@@ -348,6 +348,7 @@ impl Default for BackfillConfig {
 pub struct SolanaIndexerConfigBuilder {
     database_url: Option<String>,
     program_ids: Option<Vec<String>>,
+    indexing_mode: Option<IndexingMode>,
     accounts_to_decode: Option<Vec<String>>,
     poll_interval_secs: Option<u64>,
     batch_size: Option<usize>,
@@ -649,6 +650,13 @@ impl SolanaIndexerConfigBuilder {
         self
     }
 
+    /// Sets the indexing mode.
+    #[must_use]
+    pub fn with_indexing_mode(mut self, mode: IndexingMode) -> Self {
+        self.indexing_mode = Some(mode);
+        self
+    }
+
     /// Sets the backfill configuration.
     #[must_use]
     pub fn with_backfill(mut self, config: BackfillConfig) -> Self {
@@ -782,7 +790,7 @@ impl SolanaIndexerConfigBuilder {
             poll_interval_secs,
             batch_size,
             source,
-            indexing_mode: IndexingMode::default(),
+            indexing_mode: self.indexing_mode.unwrap_or(IndexingMode::all()),
             start_strategy: self.start_strategy.unwrap_or_default(),
             backfill: self.backfill.unwrap_or_default(),
             registry: self.registry.unwrap_or_default(),
@@ -838,6 +846,7 @@ mod tests {
                 assert_eq!(poll_interval_secs, 5);
                 assert_eq!(batch_size, 100);
             }
+            #[allow(unreachable_patterns)]
             _ => panic!("Expected RPC source"),
         }
         Ok(())

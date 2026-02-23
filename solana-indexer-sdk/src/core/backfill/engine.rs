@@ -75,6 +75,7 @@ impl BackfillEngine {
     /// Starts backfill for a specific range.
     ///
     /// This is used by BackfillManager to process a specific slot range.
+    #[tracing::instrument(skip_all, fields(start_slot = range.start_slot, end_slot = range.end_slot))]
     pub async fn start_range(&self, range: BackfillRange) -> Result<()> {
         log(
             LogLevel::Info,
@@ -245,6 +246,7 @@ impl BackfillEngine {
     /// Similar to `SolanaIndexer::process_transaction_core` but dispatches
     /// to BackfillHandler<T> instead of EventHandler<T>.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(skip_all, fields(signature = %signature))]
     pub(crate) async fn process_backfill_transaction_core(
         signature: Signature,
         fetcher: Arc<Fetcher>,
@@ -454,6 +456,7 @@ impl BackfillEngine {
     /// 3. Detecting and handling chain reorganizations.
     /// 4. Filtering blocks for relevant transactions.
     /// 5. Processing transactions using the standard indexer pipeline.
+    #[tracing::instrument(skip_all)]
     pub async fn start(&self) -> Result<()> {
         log(LogLevel::Info, "Starting backfill engine...");
 

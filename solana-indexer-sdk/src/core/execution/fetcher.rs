@@ -351,19 +351,19 @@ impl Fetcher {
         let max_retries = 5;
         let mut attempt = 0;
 
+        let default_commitment = self.commitment;
         loop {
             attempt += 1;
             let rpc_url_clone = rpc_url.clone();
 
             let result = tokio::task::spawn_blocking(move || {
-                let rpc_client =
-                    RpcClient::new_with_commitment(rpc_url_clone, CommitmentConfig::confirmed());
+                let rpc_client = RpcClient::new_with_commitment(rpc_url_clone, default_commitment);
                 // Using get_block_with_encoding
                 let config = solana_client::rpc_config::RpcBlockConfig {
                     encoding: Some(UiTransactionEncoding::JsonParsed),
                     transaction_details: None,
                     rewards: None,
-                    commitment: Some(CommitmentConfig::finalized()),
+                    commitment: Some(default_commitment),
                     max_supported_transaction_version: Some(0),
                 };
                 rpc_client.get_block_with_config(slot, config).map_err(|e| {

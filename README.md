@@ -11,7 +11,7 @@ For more information, please see the [SDK's README](solana-indexer-sdk/README.md
 
 ## Examples
 
-The `examples` directory contains a set of examples that demonstrate how to use the SDK to build custom indexers.
+The `examples` directory contains a set of examples that demonstrate how to use the SDK to build custom indexers. This includes an OpenTelemetry (`observability/`) stack featuring Docker-based local setup of Grafana, Prometheus, and Tempo.
 
 For more information, please see the [examples' README](examples/README.md).
 

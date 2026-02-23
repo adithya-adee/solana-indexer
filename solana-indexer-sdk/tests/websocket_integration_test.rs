@@ -1,3 +1,5 @@
+#![cfg(feature = "websockets")]
+
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use solana_indexer_sdk::{SolanaIndexer, SolanaIndexerConfigBuilder, Storage};

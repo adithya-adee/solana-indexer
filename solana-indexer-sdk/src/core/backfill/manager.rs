@@ -82,6 +82,7 @@ impl BackfillManager {
     ///
     /// This method runs indefinitely, periodically checking for backfill ranges
     /// and processing them until cancellation is requested.
+    #[tracing::instrument(skip_all)]
     pub async fn run(self) -> Result<()> {
         log(LogLevel::Info, "Starting BackfillManager...");
 
@@ -123,6 +124,7 @@ impl BackfillManager {
     }
 
     /// Checks for a backfill range and processes it if available.
+    #[tracing::instrument(skip_all)]
     async fn check_and_process_range(&self) -> Result<bool> {
         // Build context for trigger decision
         let latest_finalized = self
@@ -168,6 +170,7 @@ impl BackfillManager {
     }
 
     /// Processes a specific backfill range.
+    #[tracing::instrument(skip_all, fields(start_slot = range.start_slot, end_slot = range.end_slot))]
     async fn process_range(&self, range: BackfillRange) -> Result<()> {
         // Create a temporary strategy that uses the range
         let range_strategy = Arc::new(RangeBackfillStrategy {

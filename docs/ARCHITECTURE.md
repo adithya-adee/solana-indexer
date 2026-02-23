@@ -403,8 +403,9 @@ async fn main() -> Result<()> {
 | Builder Pattern Configuration | ✅ |
 | Criterion Benchmarks (decoder, storage, throughput) | ✅ |
 | Integration Test Suite | ✅ |
-| 11 Working Examples (Jupiter, Raydium, SPL, etc.) | ✅ |
+| 12 Working Examples (Jupiter, Raydium, OpenTelemetry, etc.) | ✅ |
 | **Yellowstone gRPC Streaming (Laserstream)** | ✅ |
+| **OpenTelemetry Tracing & Observability** (Tempo, Prometheus, Grafana) | ✅ |
 
 ### 🚀 Roadmap (v0.3.0+)
 
@@ -413,7 +414,6 @@ async fn main() -> Result<()> {
 | **crates.io Release** | 🔴 High | Publish to crates.io for ecosystem adoption |
 | **Configurable Retry Logic** | 🟡 Medium | Exponential backoff for transient RPC failures |
 | **Dead-Letter Queue** | 🟡 Medium | Capture events that fail after all retries |
-| **Prometheus/Grafana Metrics** | 🟡 Medium | Observability dashboard integration |
 | **Custom Database Backends** | 🟡 Medium | SQLite, ClickHouse, MongoDB support |
 | **Rate Limiting** | 🟢 Low | Respect RPC provider quotas automatically |
 | **GraphQL Query Layer** | 🟢 Low | Auto-generated query API from indexed data |

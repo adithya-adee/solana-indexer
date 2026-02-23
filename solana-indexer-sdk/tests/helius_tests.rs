@@ -1,3 +1,5 @@
+#![cfg(feature = "helius")]
+
 use solana_indexer_sdk::config::{HeliusNetwork, SourceConfig};
 use solana_indexer_sdk::SolanaIndexerConfigBuilder;
 
