@@ -258,7 +258,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _guard = init_telemetry_with_otel(TelemetryConfig {
         service_name: "solana-helius-indexer".into(),
-        log_filter: "warn,solana_indexer_sdk=info,otel_helius_indexer=debug".into(),
+        // Keep noisy ws parsing spam out by only showing warn level for the main executable
+        log_filter: "warn,solana_indexer_sdk=warn,otel_helius_indexer=info".into(),
         enable_console_colors: true,
         show_target: false,
         show_thread_ids: false,

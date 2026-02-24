@@ -105,9 +105,11 @@ impl HeliusSource {
                                                         slot: result.slot,
                                                         transaction:
                                                             EncodedTransactionWithStatusMeta {
-                                                                transaction: result.transaction,
-                                                                meta: Some(result.meta),
-                                                                version: result.version,
+                                                                transaction: result
+                                                                    .transaction
+                                                                    .transaction,
+                                                                meta: Some(result.transaction.meta),
+                                                                version: result.transaction.version,
                                                             },
                                                         block_time: result.block_time,
                                                     };
@@ -124,9 +126,11 @@ impl HeliusSource {
                                             }
                                         }
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
                                         // Ignore ping/pong or other messages for now
-                                        // Could be helpful to log debug if needed
+                                        if !text.contains("pong") {
+                                            tracing::warn!("Failed to parse Helius WS message: text={}, error={}", text, e);
+                                        }
                                     }
                                 }
                             }
@@ -195,8 +199,13 @@ struct HeliusParams {
 struct HeliusResult {
     signature: String,
     slot: u64,
-    #[serde(default)]
+    #[serde(alias = "blockTime", default)]
     block_time: Option<i64>,
+    transaction: HeliusTransactionWithMeta,
+}
+
+#[derive(Deserialize)]
+struct HeliusTransactionWithMeta {
     transaction: solana_transaction_status::EncodedTransaction,
     meta: solana_transaction_status::UiTransactionStatusMeta,
     #[serde(default)]
@@ -216,32 +225,34 @@ mod tests {
                     "signature": "5h6x",
                     "slot": 12345,
                     "transaction": {
-                        "signatures": ["5h6x"],
-                        "message": {
-                            "accountKeys": [],
-                            "header": {
-                                "numReadonlySignedAccounts": 0,
-                                "numReadonlyUnsignedAccounts": 0,
-                                "numRequiredSignatures": 1
-                            },
-                            "instructions": [],
-                            "recentBlockhash": "11111111111111111111111111111111"
-                        }
+                        "transaction": {
+                            "signatures": ["5h6x"],
+                            "message": {
+                                "accountKeys": [],
+                                "header": {
+                                    "numReadonlySignedAccounts": 0,
+                                    "numReadonlyUnsignedAccounts": 0,
+                                    "numRequiredSignatures": 1
+                                },
+                                "instructions": [],
+                                "recentBlockhash": "11111111111111111111111111111111"
+                            }
+                        },
+                        "meta": {
+                            "err": null,
+                            "fee": 5000,
+                            "preBalances": [],
+                            "postBalances": [],
+                            "innerInstructions": [],
+                            "logMessages": [],
+                            "preTokenBalances": [],
+                            "postTokenBalances": [],
+                            "rewards": [],
+                            "status": {"Ok": null}
+                        },
+                        "version": 0
                     },
-                    "meta": {
-                        "err": null,
-                        "fee": 5000,
-                        "preBalances": [],
-                        "postBalances": [],
-                        "innerInstructions": [],
-                        "logMessages": [],
-                        "preTokenBalances": [],
-                        "postTokenBalances": [],
-                        "rewards": [],
-                        "status": {"Ok": null}
-                    },
-                    "blockTime": 1678900000,
-                    "version": 0
+                    "blockTime": 1678900000
                 }
             }
         }
@@ -252,6 +263,9 @@ mod tests {
         let result = notification.params.unwrap().result;
         assert_eq!(result.slot, 12345);
         assert_eq!(result.signature, "5h6x");
-        assert_eq!(result.version, Some(TransactionVersion::Number(0)));
+        assert_eq!(
+            result.transaction.version,
+            Some(TransactionVersion::Number(0))
+        );
     }
 }
