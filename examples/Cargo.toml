@@ -78,3 +78,8 @@ required-features = ["solana-indexer-sdk/opentelemetry"]
 name = "otel_laserstream_indexer"
 path = "otel_laserstream_indexer.rs"
 required-features = ["solana-indexer-sdk/opentelemetry", "solana-indexer-sdk/laserstream"]
+
+[[example]]
+name = "otel_helius_indexer"
+path = "otel_helius_indexer.rs"
+required-features = ["solana-indexer-sdk/opentelemetry", "solana-indexer-sdk/helius"]
