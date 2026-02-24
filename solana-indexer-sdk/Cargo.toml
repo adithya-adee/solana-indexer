@@ -11,6 +11,10 @@ keywords = ["solana", "indexer", "blockchain", "web3"]
 categories = ["cryptography::cryptocurrencies"]
 readme = "README.md"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = []
 idl-build = ["dep:solana-indexer-idl"]

@@ -131,6 +131,7 @@
 //!
 //! - **Dynamic Backfill**: If the indexer detects it is far behind the current state of the blockchain (based on the `desired_lag_slots` config), it will automatically start a background task to fetch and process historical transactions, all while continuing to process live data.
 
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![warn(clippy::all)]
 #![allow(clippy::module_name_repetitions)]
 
