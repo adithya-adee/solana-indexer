@@ -2,6 +2,13 @@
 name = "solana-indexer-idl"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
+description = "A procedural macro for auto-generating Solana types from Anchor IDLs"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/adithya-adee/solana-indexer"
+repository = "https://github.com/adithya-adee/solana-indexer"
+keywords = ["solana", "idl", "anchor", "proc-macro"]
+categories = ["cryptography::cryptocurrencies", "development-tools::procedural-macro-helpers"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
