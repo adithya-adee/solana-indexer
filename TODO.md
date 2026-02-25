@@ -46,6 +46,8 @@
 
 - [x] **Configurable Retry Logic**
   - [x] Implement exponential backoff for transient RPC failures
+- [x] **Example telemetry**
+  - [x] Use `init_telemetry` to enable logs in `rpc_system_transfer`
 - [ ] **Dead-Letter Queue (DLQ)**
   - [ ] Capture logic for events that fail processing after retries
 - [ ] **Custom Database Backends**

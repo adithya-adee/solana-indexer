@@ -36,6 +36,10 @@ pub trait RpcProvider: Send + Sync {
         slot: u64,
         commitment: Option<CommitmentConfig>,
     ) -> Result<solana_transaction_status::UiConfirmedBlock>;
+
+    async fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>>;
+
+    async fn get_slot(&self, commitment: Option<CommitmentConfig>) -> Result<u64>;
 }
 
 pub struct DefaultRpcProvider {
@@ -91,7 +95,7 @@ impl RpcProvider for DefaultRpcProvider {
             .get_transaction_with_config(
                 signature,
                 solana_client::rpc_config::RpcTransactionConfig {
-                    encoding: Some(solana_transaction_status::UiTransactionEncoding::Json),
+                    encoding: Some(solana_transaction_status::UiTransactionEncoding::JsonParsed),
                     commitment,
                     max_supported_transaction_version: Some(0),
                 },
@@ -123,13 +127,29 @@ impl RpcProvider for DefaultRpcProvider {
             .get_block_with_config(
                 slot,
                 solana_client::rpc_config::RpcBlockConfig {
-                    encoding: Some(solana_transaction_status::UiTransactionEncoding::Json),
+                    encoding: Some(solana_transaction_status::UiTransactionEncoding::JsonParsed),
                     transaction_details: Some(solana_transaction_status::TransactionDetails::Full),
                     rewards: Some(false),
                     commitment,
                     max_supported_transaction_version: Some(0),
                 },
             )
+            .await
+            .map_err(|e| crate::utils::error::SolanaIndexerError::RpcClientError(Box::new(e)))?)
+    }
+
+    async fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
+        Ok(self
+            .client
+            .get_program_accounts(program_id)
+            .await
+            .map_err(|e| crate::utils::error::SolanaIndexerError::RpcClientError(Box::new(e)))?)
+    }
+
+    async fn get_slot(&self, commitment: Option<CommitmentConfig>) -> Result<u64> {
+        Ok(self
+            .client
+            .get_slot_with_commitment(commitment.unwrap_or_default())
             .await
             .map_err(|e| crate::utils::error::SolanaIndexerError::RpcClientError(Box::new(e)))?)
     }

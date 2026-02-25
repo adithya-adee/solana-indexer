@@ -213,6 +213,15 @@ impl<P: RpcProvider + Send + Sync> RpcProvider for RetryingRpcProvider<P> {
         self.with_retry(|| self.inner.get_block(slot, commitment))
             .await
     }
+
+    async fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
+        self.with_retry(|| self.inner.get_program_accounts(program_id))
+            .await
+    }
+
+    async fn get_slot(&self, commitment: Option<CommitmentConfig>) -> Result<u64> {
+        self.with_retry(|| self.inner.get_slot(commitment)).await
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -362,6 +371,14 @@ mod tests {
             _: u64,
             _: Option<CommitmentConfig>,
         ) -> Result<solana_transaction_status::UiConfirmedBlock> {
+            unimplemented!()
+        }
+
+        async fn get_program_accounts(&self, _: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
+            unimplemented!()
+        }
+
+        async fn get_slot(&self, _: Option<CommitmentConfig>) -> Result<u64> {
             unimplemented!()
         }
     }

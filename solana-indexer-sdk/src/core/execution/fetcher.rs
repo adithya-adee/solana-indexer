@@ -206,38 +206,7 @@ impl Fetcher {
         &self,
         program_id: &solana_sdk::pubkey::Pubkey,
     ) -> Result<Vec<(solana_sdk::pubkey::Pubkey, solana_sdk::account::Account)>> {
-        // get_program_accounts is not part of the RpcProvider trait (it's less common),
-        // so we keep using a blocking call here via the underlying DefaultRpcProvider path.
-        // This is acceptable: get_program_accounts has its own internal retries from the
-        // RetryingRpcProvider wrapping get_transaction / get_block already.
-        let rpc_url_ref: &dyn RpcProvider = &*self.rpc;
-        let _ = rpc_url_ref; // suppress unused warning
-
-        // Fall back to a direct spawn_blocking since this RPC call is not in the trait.
-        let commitment = self.commitment;
-        let pid = *program_id;
-
-        // We need the URL to create a client — extract it via a known concrete type if possible,
-        // otherwise document that get_program_accounts goes direct. In practice users call this
-        // rarely (it's for account scanning). We delegate to a fresh blocking client.
-        // The retry wrapper still covers the per-call transient errors via the trait methods.
-        tokio::task::spawn_blocking(move || {
-            let rpc_client = solana_client::rpc_client::RpcClient::new_with_commitment(
-                // We use a localhost placeholder; callers inject the real URL via Fetcher::new.
-                // This method is invoked by the indexer which always uses Fetcher::new(url, _).
-                // See the note below.
-                String::new(), // will be overridden by the concrete impl below
-                commitment,
-            );
-            // Actually: call via the blocking RpcClient stored in the concrete DefaultRpcProvider.
-            // Since we can't downcast Arc<dyn RpcProvider> easily, we keep the previous approach
-            // of a raw spawn_blocking with the stored URL. We do this by storing rpc_url separately.
-            rpc_client.get_program_accounts(&pid).map_err(|e| {
-                SolanaIndexerError::RpcError(format!("Failed to fetch program accounts: {e}"))
-            })
-        })
-        .await
-        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+        self.rpc.get_program_accounts(program_id).await
     }
 
     /// Fetches a block with a specific commitment level.
@@ -256,22 +225,7 @@ impl Fetcher {
 
     /// Gets the latest finalized slot.
     pub async fn get_latest_finalized_slot(&self) -> Result<u64> {
-        // get_slot is not in the RpcProvider trait; keep a direct blocking call.
-        // Transient errors here are handled by the RetryingRpcProvider at the trait level;
-        // for this non-trait call we do a simple one-shot (acceptable — slot queries are
-        // extremely cheap and almost never fail transiently without the whole node being down).
-        let commitment = CommitmentConfig::finalized();
-        tokio::task::spawn_blocking(move || {
-            let client = solana_client::rpc_client::RpcClient::new_with_commitment(
-                String::new(),
-                commitment,
-            );
-            client.get_slot_with_commitment(commitment).map_err(|e| {
-                SolanaIndexerError::RpcError(format!("Failed to get latest finalized slot: {e}"))
-            })
-        })
-        .await
-        .map_err(|e| SolanaIndexerError::InternalError(format!("Task join error: {e}")))?
+        self.rpc.get_slot(Some(CommitmentConfig::finalized())).await
     }
 }
 
