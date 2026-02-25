@@ -44,16 +44,16 @@
 
 ### Phase 3: Reliability & Extensibility (Upcoming)
 
-- [ ] **Configurable Retry Logic**
-  - [ ] Implement exponential backoff for transient RPC failures
+- [x] **Configurable Retry Logic**
+  - [x] Implement exponential backoff for transient RPC failures
 - [ ] **Dead-Letter Queue (DLQ)**
   - [ ] Capture logic for events that fail processing after retries
 - [ ] **Custom Database Backends**
   - [ ] Refactor traits to allow SQLite/ClickHouse alongside PostgreSQL
-- [ ] **crates.io Publishing**
-  - [ ] Verify `solana-indexer-idl` and `solana-indexer-sdk` package metadata
-  - [ ] Publish version `0.1.0` and `0.2.0` respectively
+- [x] **crates.io Publishing**
+  - [x] Verify `solana-indexer-idl` and `solana-indexer-sdk` package metadata
+  - [x] Publish version `0.1.0` and `0.2.0` respectively
 
-- [ ] **Parser Refinement (Complete)**
+- [x] **Parser Refinement (Complete)**
   - [x] Implement `TypeOnly` generation mode in `solana-indexer-idl`.
   - [x] Verify production-grade Borch serialization for all generated types.

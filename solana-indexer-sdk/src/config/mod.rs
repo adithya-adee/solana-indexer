@@ -40,6 +40,50 @@ impl From<CommitmentLevel> for solana_sdk::commitment_config::CommitmentConfig {
     }
 }
 
+/// Configuration for retry behaviour on transient RPC failures.
+///
+/// Used by [`RetryingRpcProvider`](crate::utils::retry::RetryingRpcProvider) to control
+/// how many times a failing RPC call is retried and how long to wait between attempts.
+///
+/// # Example
+///
+/// ```
+/// use solana_indexer_sdk::RetryConfig;
+///
+/// let cfg = RetryConfig {
+///     max_retries: 3,
+///     initial_backoff_ms: 200,
+///     backoff_multiplier: 2.0,
+///     max_backoff_ms: 10_000,
+///     jitter: true,
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts for transient errors (default: 5).
+    pub max_retries: u32,
+    /// Initial delay before the first retry in milliseconds (default: 100).
+    pub initial_backoff_ms: u64,
+    /// Multiplier applied to the delay after each attempt (default: 2.0 = exponential).
+    pub backoff_multiplier: f64,
+    /// Maximum delay cap in milliseconds (default: 30 000).
+    pub max_backoff_ms: u64,
+    /// Add random ±25 % jitter to prevent thundering-herd effects (default: true).
+    pub jitter: bool,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 5,
+            initial_backoff_ms: 100,
+            backoff_multiplier: 2.0,
+            max_backoff_ms: 30_000,
+            jitter: true,
+        }
+    }
+}
+
 /// Configuration for registry memory limits and monitoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RegistryConfig {
@@ -100,6 +144,9 @@ pub struct SolanaIndexerConfig {
 
     /// Number of worker threads for parallel transaction processing (default: 10)
     pub worker_threads: usize,
+
+    /// Retry configuration for transient RPC failures.
+    pub retry: RetryConfig,
 }
 
 impl SolanaIndexerConfig {
@@ -359,6 +406,7 @@ pub struct SolanaIndexerConfigBuilder {
     stale_tentative_threshold: Option<u64>,
     worker_threads: Option<usize>,
     commitment_level: Option<CommitmentLevel>,
+    retry: Option<RetryConfig>,
 }
 
 impl SolanaIndexerConfigBuilder {
@@ -699,6 +747,30 @@ impl SolanaIndexerConfigBuilder {
         self
     }
 
+    /// Overrides the retry configuration for transient RPC failures.
+    ///
+    /// If not called, [`RetryConfig::default`] is used (5 retries, exponential backoff, jitter).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use solana_indexer_sdk::{SolanaIndexerConfigBuilder, RetryConfig};
+    ///
+    /// let builder = SolanaIndexerConfigBuilder::new()
+    ///     .with_retry(RetryConfig {
+    ///         max_retries: 3,
+    ///         initial_backoff_ms: 50,
+    ///         backoff_multiplier: 2.0,
+    ///         max_backoff_ms: 5_000,
+    ///         jitter: false,
+    ///     });
+    /// ```
+    #[must_use]
+    pub fn with_retry(mut self, config: RetryConfig) -> Self {
+        self.retry = Some(config);
+        self
+    }
+
     /// Builds and validates the configuration.
     ///
     /// # Errors
@@ -797,6 +869,7 @@ impl SolanaIndexerConfigBuilder {
             stale_tentative_threshold: self.stale_tentative_threshold.unwrap_or(1000),
             worker_threads: self.worker_threads.unwrap_or(10),
             commitment_level: self.commitment_level.unwrap_or_default(),
+            retry: self.retry.unwrap_or_default(),
         })
     }
 }

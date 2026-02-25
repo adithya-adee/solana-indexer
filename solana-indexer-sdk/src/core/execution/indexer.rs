@@ -24,6 +24,8 @@ use crate::{
     utils::{
         error::{Result, SolanaIndexerError},
         logging,
+        retry::RetryingRpcProvider,
+        rpc::DefaultRpcProvider,
     },
 };
 
@@ -112,8 +114,13 @@ impl SolanaIndexer {
         let storage = Arc::new(Storage::new(&config.database_url).await?);
         storage.initialize().await?;
 
-        let fetcher = Arc::new(Fetcher::new(
+        let raw_rpc = DefaultRpcProvider::new_with_commitment(
             config.rpc_url(),
+            config.commitment_level.into(),
+        );
+        let retrying_rpc = RetryingRpcProvider::new(raw_rpc, config.retry.clone());
+        let fetcher = Arc::new(Fetcher::with_provider(
+            Arc::new(retrying_rpc),
             config.commitment_level.into(),
         ));
         let decoder = Arc::new(Decoder::new());
@@ -145,8 +152,13 @@ impl SolanaIndexer {
     ///
     /// This is useful for testing with mock storage.
     pub fn new_with_storage(config: SolanaIndexerConfig, storage: Arc<dyn StorageBackend>) -> Self {
-        let fetcher = Arc::new(Fetcher::new(
+        let raw_rpc = DefaultRpcProvider::new_with_commitment(
             config.rpc_url(),
+            config.commitment_level.into(),
+        );
+        let retrying_rpc = RetryingRpcProvider::new(raw_rpc, config.retry.clone());
+        let fetcher = Arc::new(Fetcher::with_provider(
+            Arc::new(retrying_rpc),
             config.commitment_level.into(),
         ));
         let decoder = Arc::new(Decoder::new());

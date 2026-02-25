@@ -43,9 +43,17 @@ pub struct DefaultRpcProvider {
 }
 
 impl DefaultRpcProvider {
+    /// Creates a provider connecting to `rpc_url` with the default commitment level.
     pub fn new(rpc_url: &str) -> Self {
         Self {
             client: RpcClient::new(rpc_url.to_string()),
+        }
+    }
+
+    /// Creates a provider with a specific commitment configuration.
+    pub fn new_with_commitment(rpc_url: &str, commitment: CommitmentConfig) -> Self {
+        Self {
+            client: RpcClient::new_with_commitment(rpc_url.to_string(), commitment),
         }
     }
 }

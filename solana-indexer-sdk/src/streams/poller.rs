@@ -303,6 +303,7 @@ mod tests {
             stale_tentative_threshold: 1000,
             worker_threads: 10,
             commitment_level: crate::config::CommitmentLevel::Confirmed,
+            retry: Default::default(),
         };
 
         let poller = Poller::new(config);
