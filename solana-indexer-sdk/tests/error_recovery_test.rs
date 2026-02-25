@@ -144,7 +144,7 @@ async fn test_idempotency_duplicate_transactions() {
                                 "pubkey": "11111111111111111111111111111111",
                                 "signer": true,
                                 "source": "transaction",
-                                "writable": true
+                                "writable": false
                             }
                         ],
                         "instructions": [],
