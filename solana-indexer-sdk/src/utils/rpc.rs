@@ -36,10 +36,6 @@ pub trait RpcProvider: Send + Sync {
         slot: u64,
         commitment: Option<CommitmentConfig>,
     ) -> Result<solana_transaction_status::UiConfirmedBlock>;
-
-    async fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>>;
-
-    async fn get_slot(&self, commitment: Option<CommitmentConfig>) -> Result<u64>;
 }
 
 pub struct DefaultRpcProvider {
@@ -47,17 +43,9 @@ pub struct DefaultRpcProvider {
 }
 
 impl DefaultRpcProvider {
-    /// Creates a provider connecting to `rpc_url` with the default commitment level.
     pub fn new(rpc_url: &str) -> Self {
         Self {
             client: RpcClient::new(rpc_url.to_string()),
-        }
-    }
-
-    /// Creates a provider with a specific commitment configuration.
-    pub fn new_with_commitment(rpc_url: &str, commitment: CommitmentConfig) -> Self {
-        Self {
-            client: RpcClient::new_with_commitment(rpc_url.to_string(), commitment),
         }
     }
 }
@@ -95,7 +83,7 @@ impl RpcProvider for DefaultRpcProvider {
             .get_transaction_with_config(
                 signature,
                 solana_client::rpc_config::RpcTransactionConfig {
-                    encoding: Some(solana_transaction_status::UiTransactionEncoding::JsonParsed),
+                    encoding: Some(solana_transaction_status::UiTransactionEncoding::Json),
                     commitment,
                     max_supported_transaction_version: Some(0),
                 },
@@ -127,29 +115,13 @@ impl RpcProvider for DefaultRpcProvider {
             .get_block_with_config(
                 slot,
                 solana_client::rpc_config::RpcBlockConfig {
-                    encoding: Some(solana_transaction_status::UiTransactionEncoding::JsonParsed),
+                    encoding: Some(solana_transaction_status::UiTransactionEncoding::Json),
                     transaction_details: Some(solana_transaction_status::TransactionDetails::Full),
                     rewards: Some(false),
                     commitment,
                     max_supported_transaction_version: Some(0),
                 },
             )
-            .await
-            .map_err(|e| crate::utils::error::SolanaIndexerError::RpcClientError(Box::new(e)))?)
-    }
-
-    async fn get_program_accounts(&self, program_id: &Pubkey) -> Result<Vec<(Pubkey, Account)>> {
-        Ok(self
-            .client
-            .get_program_accounts(program_id)
-            .await
-            .map_err(|e| crate::utils::error::SolanaIndexerError::RpcClientError(Box::new(e)))?)
-    }
-
-    async fn get_slot(&self, commitment: Option<CommitmentConfig>) -> Result<u64> {
-        Ok(self
-            .client
-            .get_slot_with_commitment(commitment.unwrap_or_default())
             .await
             .map_err(|e| crate::utils::error::SolanaIndexerError::RpcClientError(Box::new(e)))?)
     }

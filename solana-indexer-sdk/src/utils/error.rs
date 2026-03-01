@@ -75,17 +75,6 @@ pub enum SolanaIndexerError {
     /// Invalid data error
     #[error("Data error: {0}")]
     DataError(String),
-
-    /// All retry attempts were exhausted on a transient error.
-    ///
-    /// Contains the number of attempts made and the last error message.
-    #[error("Retry exhausted after {attempts} attempts: {last_error}")]
-    RetryExhausted {
-        /// Total number of attempts (initial call + retries).
-        attempts: u32,
-        /// String representation of the last error.
-        last_error: String,
-    },
 }
 
 /// Type alias for Results using `SolanaIndexerError`.

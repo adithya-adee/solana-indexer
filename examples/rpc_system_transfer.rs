@@ -11,9 +11,9 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use solana_indexer_sdk::{
     calculate_discriminator,
     config::{BackfillConfig, CommitmentLevel, StartStrategy},
-    init_telemetry, BackfillContext, BackfillHandler, BackfillRange, BackfillTrigger,
-    EventDiscriminator, EventHandler, InstructionDecoder, RetryConfig, SolanaIndexer,
-    SolanaIndexerConfigBuilder, SolanaIndexerError, StorageBackend, TelemetryConfig, TxMetadata,
+    BackfillContext, BackfillHandler, BackfillRange, BackfillTrigger, EventDiscriminator,
+    EventHandler, InstructionDecoder, SolanaIndexer, SolanaIndexerConfigBuilder,
+    SolanaIndexerError, StorageBackend, TxMetadata,
 };
 use solana_sdk::pubkey::Pubkey;
 use solana_transaction_status::{UiInstruction, UiParsedInstruction};
@@ -250,15 +250,6 @@ impl BackfillTrigger for OnceBackfillTrigger {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
-
-    // Enable SDK's native console logging (via tracing)
-    let _guard = init_telemetry(TelemetryConfig {
-        service_name: "system-transfer-example".to_string(),
-        log_filter: "info".to_string(),
-        enable_console_colors: true,
-        ..Default::default()
-    });
-
     println!("🚀 System Transfer Indexer starting...");
 
     let rpc_url = "https://api.devnet.solana.com".to_string();
@@ -274,14 +265,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    let retry_config = RetryConfig {
-        max_retries: 5,
-        initial_backoff_ms: 500, // Wait 500ms before first retry
-        backoff_multiplier: 2.0, // Exponential backoff (500ms, 1s, 2s...)
-        max_backoff_ms: 10_000,  // Cap backoff at 10s
-        jitter: true,            // Add random jitter to prevent thundering herd
-    };
-
     let config = SolanaIndexerConfigBuilder::new()
         .with_rpc(rpc_url)
         .with_database(database_url.clone())
@@ -292,7 +275,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_commitment(CommitmentLevel::Confirmed)
         .with_start_strategy(StartStrategy::Latest)
         .with_backfill(backfill_config)
-        .with_retry(retry_config)
         .build()?;
 
     let mut indexer = SolanaIndexer::new(config).await?;
