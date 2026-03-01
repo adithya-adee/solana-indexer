@@ -23,6 +23,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_rpc("https://api.mainnet-beta.solana.com")
         .with_database("postgresql://postgres:password@localhost/indexer")
         .program_id("675k1q2wE7s6L3R29fs6tcMbtFD4vT759Wcx3CY6CSLg") // Raydium
+        .with_retry(solana_indexer_sdk::RetryConfig {
+            max_retries: 5,
+            jitter: true,
+            ..Default::default()
+        })
+        .with_backfill(solana_indexer_sdk::config::BackfillConfig {
+            enabled: true,
+            max_concurrent_tasks: 50,
+            ..Default::default()
+        })
         .build()?;
 
     let mut indexer = SolanaIndexer::new(config).await?;
@@ -30,6 +40,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Register your custom logic (InstructionDecoder and EventHandler)
     // indexer.decoder_registry_mut().register(...);
     // indexer.handler_registry_mut().register(...);
+    // indexer.register_backfill_handler(...)?;
+    // indexer.with_backfill_trigger(std::sync::Arc::new(CustomBackfillTrigger {
+    //     start_slot: backfill_start,
+    //     end_slot: latest_slot,
+    // }))?;
 
     indexer.start().await?;
     Ok(())
@@ -44,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **Automatic Reorg Handling:** Built-in detection and recovery for chain reorganizations.
 - **Backfill Engine:** Seamlessly index historical data alongside real-time updates.
 - **Flexible Data Sources:** Support for RPC polling, WebSocket streams, and Helius Webhooks.
+- **Configurable RPC Retry Logic:** Enterprise-grade exponential backoff and jitter configuration through `RetryConfig` to easily intercept transient node failures.
 - **Type-Safe Events:** Strongly-typed event definitions using Borsh serialization.
 - **IDL-Based Type Generation:** Automatically generate Rust types from Solana program IDL files.
 
