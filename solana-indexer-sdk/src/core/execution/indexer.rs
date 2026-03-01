@@ -24,6 +24,8 @@ use crate::{
     utils::{
         error::{Result, SolanaIndexerError},
         logging,
+        retry::RetryingRpcProvider,
+        rpc::DefaultRpcProvider,
     },
 };
 
@@ -112,8 +114,13 @@ impl SolanaIndexer {
         let storage = Arc::new(Storage::new(&config.database_url).await?);
         storage.initialize().await?;
 
-        let fetcher = Arc::new(Fetcher::new(
+        let raw_rpc = DefaultRpcProvider::new_with_commitment(
             config.rpc_url(),
+            config.commitment_level.into(),
+        );
+        let retrying_rpc = RetryingRpcProvider::new(raw_rpc, config.retry.clone());
+        let fetcher = Arc::new(Fetcher::with_provider(
+            Arc::new(retrying_rpc),
             config.commitment_level.into(),
         ));
         let decoder = Arc::new(Decoder::new());
@@ -145,8 +152,13 @@ impl SolanaIndexer {
     ///
     /// This is useful for testing with mock storage.
     pub fn new_with_storage(config: SolanaIndexerConfig, storage: Arc<dyn StorageBackend>) -> Self {
-        let fetcher = Arc::new(Fetcher::new(
+        let raw_rpc = DefaultRpcProvider::new_with_commitment(
             config.rpc_url(),
+            config.commitment_level.into(),
+        );
+        let retrying_rpc = RetryingRpcProvider::new(raw_rpc, config.retry.clone());
+        let fetcher = Arc::new(Fetcher::with_provider(
+            Arc::new(retrying_rpc),
             config.commitment_level.into(),
         ));
         let decoder = Arc::new(Decoder::new());
@@ -1717,7 +1729,6 @@ impl SolanaIndexer {
             for (discriminator, event_data) in events {
                 // Retry handler 3 times
                 let mut attempts = 0;
-                let max_attempts = 3;
                 loop {
                     attempts += 1;
                     match handler_registry
@@ -1725,12 +1736,17 @@ impl SolanaIndexer {
                         .await
                     {
                         Ok(()) => break,
-                        Err(e) if attempts < max_attempts => {
+                        Err(e) if attempts <= config.retry.max_retries => {
                             logging::log_error(
                                 "Handler error",
-                                &format!("Attempt {attempts}/{max_attempts} for {sig_str}: {e}"),
+                                &format!(
+                                    "Attempt {attempts}/{} for {sig_str}: {e}",
+                                    config.retry.max_retries
+                                ),
                             );
-                            tokio::time::sleep(Duration::from_millis(100 * attempts)).await;
+                            let delay =
+                                crate::utils::retry::compute_backoff(&config.retry, attempts);
+                            tokio::time::sleep(delay).await;
                         }
                         Err(e) => {
                             logging::log_error(
@@ -1751,7 +1767,6 @@ impl SolanaIndexer {
             for (discriminator, event_data) in events {
                 // Retry handler 3 times
                 let mut attempts = 0;
-                let max_attempts = 3;
                 loop {
                     attempts += 1;
                     match handler_registry
@@ -1759,12 +1774,17 @@ impl SolanaIndexer {
                         .await
                     {
                         Ok(()) => break,
-                        Err(e) if attempts < max_attempts => {
+                        Err(e) if attempts <= config.retry.max_retries => {
                             logging::log_error(
                                 "Handler error",
-                                &format!("Attempt {attempts}/{max_attempts} for {sig_str}: {e}"),
+                                &format!(
+                                    "Attempt {attempts}/{} for {sig_str}: {e}",
+                                    config.retry.max_retries
+                                ),
                             );
-                            tokio::time::sleep(Duration::from_millis(100 * attempts)).await;
+                            let delay =
+                                crate::utils::retry::compute_backoff(&config.retry, attempts);
+                            tokio::time::sleep(delay).await;
                         }
                         Err(e) => {
                             logging::log_error(
@@ -1822,7 +1842,6 @@ impl SolanaIndexer {
                                     // Dispatch to handler
                                     // Retry logic similar to above
                                     let mut attempts = 0;
-                                    let max_attempts = 3;
                                     loop {
                                         attempts += 1;
                                         match handler_registry
@@ -1835,17 +1854,19 @@ impl SolanaIndexer {
                                             .await
                                         {
                                             Ok(()) => break,
-                                            Err(e) if attempts < max_attempts => {
+                                            Err(e) if attempts <= config.retry.max_retries => {
                                                 logging::log_error(
                                                     "Handler error (Account)",
                                                     &format!(
-                                                    "Attempt {attempts}/{max_attempts} for {sig_str}: {e}"
-                                                ),
+                                                        "Attempt {attempts}/{} for {sig_str}: {e}",
+                                                        config.retry.max_retries
+                                                    ),
                                                 );
-                                                tokio::time::sleep(Duration::from_millis(
-                                                    100 * attempts,
-                                                ))
-                                                .await;
+                                                let delay = crate::utils::retry::compute_backoff(
+                                                    &config.retry,
+                                                    attempts,
+                                                );
+                                                tokio::time::sleep(delay).await;
                                             }
                                             Err(e) => {
                                                 logging::log_error(

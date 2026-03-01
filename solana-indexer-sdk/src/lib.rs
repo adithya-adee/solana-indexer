@@ -136,7 +136,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 // Public API exports
-pub use config::{SolanaIndexerConfig, SolanaIndexerConfigBuilder};
+pub use config::{RetryConfig, SolanaIndexerConfig, SolanaIndexerConfigBuilder};
 pub use core::decoding::Decoder;
 pub use core::decoding::{DecodedTransaction, InstructionInfo};
 pub use core::execution::fetcher::Fetcher;
@@ -164,6 +164,7 @@ pub use utils::macros::{
     generate_event_struct, idl_type_to_rust, Idl, IdlAccount, IdlAccountItem, IdlEvent, IdlField,
     IdlInstruction, IdlType, IdlTypeDefinition,
 };
+pub use utils::retry::RetryingRpcProvider;
 
 // IDL module is available for documentation purposes
 // Use solana_indexer_idl::generate_sdk_types in build.rs scripts
